@@ -84,6 +84,15 @@ public:
     Type type() const;
     std::string inspect() const;
 
+    template<typename T>
+    static Value convertFrom(const std::vector<T> &arr);
+
+    template<typename T>
+    static Value convertFrom(const std::list<T> &list);
+
+    template<typename TKey, typename TValue>
+    static Value convertFrom(const std::map<TKey, TValue> &map);
+
 protected:
     template<typename T>
     T castTo() const;
@@ -121,5 +130,31 @@ bool Value::typeEq() const
         return false;
 }
 
+template<typename T>
+Value Value::convertFrom(const std::vector<T> &arr)
+{
+    std::vector<Value> result;
+
+    result.reserve(arr.size());
+    std::copy(arr.begin(), arr.end(), std::back_inserter(result));
+    return result;
+}
+
+template<typename T>
+Value Value::convertFrom(const std::list<T> &list)
+{
+    std::vector<Value> result;
+
+    std::copy(list.begin(), list.end(), std::back_inserter(result));
+    return result;
+}
+
+template<typename TKey, typename TValue>
+Value Value::convertFrom(const std::map<TKey, TValue> &map)
+{
+    std::map<Value, Value> result;
+    std::copy(map.begin(), map.end(), std::inserter(result, result.end()));
+    return result;
+}
 
 #endif // VALUE_H
