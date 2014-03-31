@@ -3,6 +3,7 @@
  * License: MIT
  */
 
+#include <limits>
 #include <boost/lexical_cast.hpp>
 
 #include "value.h"
@@ -28,24 +29,46 @@ Value::Value(bool b)
 {
 }
 
-Value::Value(uint32_t i)
-    : value(static_cast<int64_t>(i))
+Value::Value(int i)
 {
-}
-
-Value::Value(int32_t i)
-    : value(static_cast<int64_t>(i))
-{
+    if( i >= 0 )
+    {
+        PositiveInteger num = {static_cast<uint64_t>(i)};
+        value = num;
+    }
+    else
+    {
+        NegativeInteger num = {static_cast<uint64_t>(-i)};
+        value = num;
+    }
 }
 
 Value::Value(int64_t i)
-    : value(i)
 {
+    if( i >= 0 )
+    {
+        PositiveInteger num = {static_cast<uint64_t>(i)};
+        value = num;
+    }
+    else
+    {
+        NegativeInteger num = {static_cast<uint64_t>(-i)};
+        value = num;
+    }
 }
 
-Value::Value(uint64_t i)
-    : value(static_cast<int64_t>(i))
+Value::Value(uint64_t i, bool positive)
 {
+    if( positive )
+    {
+        PositiveInteger num = {i};
+        value = num;
+    }
+    else
+    {
+        NegativeInteger num = {i};
+        value = num;
+    }
 }
 
 Value::Value(double d)
@@ -55,6 +78,11 @@ Value::Value(double d)
 
 Value::Value(const std::string &s)
     : value(s)
+{
+}
+
+Value::Value(const std::vector<char> &bs)
+    : value(bs)
 {
 }
 
@@ -73,44 +101,64 @@ Value::Value(const std::map<Value, Value> &map)
 {
 }
 
+Value::Value(const BigInteger &bigint)
+    : value(bigint)
+{
+}
+
 bool Value::isNull() const
 {
-    return type() == Null;
+    return type() == NullType;
 }
 
 bool Value::isUndefined() const
 {
-    return type() == Undefined;
+    return type() == UndefinedType;
 }
 
 bool Value::isBool() const
 {
-    return type() == Bool;
+    return type() == BoolType;
 }
 
-bool Value::isInt() const
+bool Value::isPositiveInteger() const
 {
-    return type() == Integer;
+    return type() == PositiveIntegerType;
+}
+
+bool Value::isNegativeInteger() const
+{
+    return type() == NegativeIntegerType;
 }
 
 bool Value::isDouble() const
 {
-    return type() == Double;
+    return type() == DoubleType;
 }
 
 bool Value::isString() const
 {
-    return type() == String;
+    return type() == StringType;
+}
+
+bool Value::isByteString() const
+{
+    return type() == ByteStringType;
 }
 
 bool Value::isArray() const
 {
-    return type() == Array;
+    return type() == ArrayType;
 }
 
 bool Value::isMap() const
 {
-    return type() == Map;
+    return type() == MapType;
+}
+
+bool Value::isBigInteger() const
+{
+    return type() == BigIntegerType;
 }
 
 bool Value::toBool() const
@@ -118,14 +166,14 @@ bool Value::toBool() const
     return castTo<bool>();
 }
 
-int Value::toInt() const
+uint64_t Value::toPositiveInteger() const
 {
-    return castTo<int64_t>();
+    return castTo<PositiveInteger>().value;
 }
 
-int64_t Value::toInt64() const
+uint64_t Value::toNegativeInteger() const
 {
-    return castTo<int64_t>();
+    return castTo<NegativeInteger>().value;
 }
 
 double Value::toDouble() const
@@ -138,6 +186,11 @@ std::string Value::toString() const
     return castTo<std::string>();
 }
 
+std::vector<char> Value::toByteString() const
+{
+    return castTo< std::vector<char> >();
+}
+
 std::vector<Value> Value::toArray() const
 {
     return castTo< std::vector<Value> >();
@@ -146,6 +199,11 @@ std::vector<Value> Value::toArray() const
 std::map<Value, Value> Value::toMap() const
 {
     return castTo< std::map<Value, Value> >();
+}
+
+Value::BigInteger Value::toBigInteger() const
+{
+    return castTo<BigInteger>();
 }
 
 Value::Type Value::type() const
@@ -169,9 +227,22 @@ std::string Value::inspect() const
     {
         return boost::lexical_cast<std::string>(toBool());
     }
-    else if( isInt() )
+    else if( isPositiveInteger() )
     {
-        return boost::lexical_cast<std::string>(toInt());
+        return boost::lexical_cast<std::string>(toPositiveInteger());
+    }
+    else if( isNegativeInteger() )
+    {
+        std::string result = "-";
+        const char specialValue[] = "18446744073709551616"; // 0x10000000000000000
+        uint64_t value = toNegativeInteger();
+
+        if( value == 0 )
+            result += specialValue;
+        else
+            result += boost::lexical_cast<std::string>(value);
+
+        return result;
     }
     else if( isDouble() )
     {
@@ -180,6 +251,25 @@ std::string Value::inspect() const
     else if( isString() )
     {
         return toString();
+    }
+    else if( isByteString() )
+    {
+        std::vector<char> byteString = toByteString();
+        std::string result = "(0x";
+
+        static const char hex[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+                                     'A', 'B', 'C', 'D', 'E', 'F'};
+
+        for(size_t i = 0; i < byteString.size(); ++i)
+        {
+            unsigned char c = static_cast<unsigned char>(byteString[i]);
+
+            result += hex[c / sizeof(hex)];
+            result += hex[c % sizeof(hex)];
+        }
+
+        result += ')';
+        return result;
     }
     else if( isArray() )
     {
@@ -232,12 +322,43 @@ std::string Value::inspect() const
 
         return result;
     }
-    else
+    else if( isBigInteger() )
     {
-        assert(false);
-        std::string invalidType = "(invalid type)";
-        return invalidType;
+        BigInteger bigInteger = toBigInteger();
+        std::string result;
+
+        if( bigInteger.positive )
+            result = "(big integer: 0x";
+        else
+            result = "(negative big integer: 0x";
+
+        static const char hex[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+                                     'A', 'B', 'C', 'D', 'E', 'F'};
+
+        if( bigInteger.bigint.empty() == false )
+        {
+            for(size_t i = 0; i < bigInteger.bigint.size(); ++i)
+            {
+                unsigned char c = static_cast<unsigned char >(bigInteger.bigint[i]);
+
+                result += hex[c / sizeof(hex)];
+                result += hex[c % sizeof(hex)];
+            }
+
+            result.resize(result.size() - 1);
+            result[result.size() - 1] = ')';
+        }
+        else
+        {
+            result += ')';
+        }
+
+        return result;
     }
+
+    assert(false);
+    std::string invalidType = "(invalid type)";
+    return invalidType;
 }
 
 bool operator < (const Value &lhs, const Value &rhs)
@@ -249,4 +370,3 @@ bool operator == (const Value &lhs, const Value &rhs)
 {
     return lhs.value == rhs.value;
 }
-

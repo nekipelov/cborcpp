@@ -50,8 +50,7 @@ BOOST_AUTO_TEST_CASE( PositiveNumbers )
     BOOST_CHECK_EQUAL(static_cast<uint64_t>(4294967296ULL), decode(toVector("\x1B\x00\x00\x00\x01\x00\x00\x00\x00")));
     BOOST_CHECK_EQUAL(1000000, decode(toVector("\x1a\x00\x0f\x42\x40")));
     BOOST_CHECK_EQUAL(static_cast<uint64_t>(1000000000000ULL), decode(toVector("\x1b\x00\x00\x00\xe8\xd4\xa5\x10\x00")));
-//    (18446744073709551615, "\x1b\xff\xff\xff\xff\xff\xff\xff\xff");
-//    (18446744073709551616, "\xc2\x49\x01\x00\x00\x00\x00\x00\x00\x00\x00");
+    BOOST_CHECK_EQUAL(static_cast<uint64_t>(18446744073709551615ULL), decode(toVector("\x1b\xff\xff\xff\xff\xff\xff\xff\xff")));
 
     BOOST_VERIFY(encode(0) == toVector("\x00"));
     BOOST_VERIFY(encode(1) == toVector("\x01"));
@@ -66,8 +65,7 @@ BOOST_AUTO_TEST_CASE( PositiveNumbers )
     BOOST_VERIFY(encode(static_cast<uint64_t>(4294967296ULL)) == toVector("\x1B\x00\x00\x00\x01\x00\x00\x00\x00"));
     BOOST_VERIFY(encode(1000000) == toVector("\x1a\x00\x0f\x42\x40"));
     BOOST_VERIFY(encode(static_cast<uint64_t>(1000000000000ULL)) == toVector("\x1b\x00\x00\x00\xe8\xd4\xa5\x10\x00"));
-//    (18446744073709551615, "\x1b\xff\xff\xff\xff\xff\xff\xff\xff");
-//    (18446744073709551616, "\xc2\x49\x01\x00\x00\x00\x00\x00\x00\x00\x00");
+    BOOST_VERIFY(encode(static_cast<uint64_t>(18446744073709551615ULL)) ==  toVector("\x1b\xff\xff\xff\xff\xff\xff\xff\xff"));
 }
 
 BOOST_AUTO_TEST_CASE( NegativeNumbers )
@@ -83,8 +81,19 @@ BOOST_AUTO_TEST_CASE( NegativeNumbers )
     BOOST_CHECK_EQUAL(-65536, decode(toVector("\x39\xFF\xFF")));
     BOOST_CHECK_EQUAL(static_cast<int64_t>(-4294967295LL), decode(toVector("\x3A\xFF\xFF\xFF\xFE")));
     BOOST_CHECK_EQUAL(static_cast<int64_t>(-4294967296LL), decode(toVector("\x3A\xFF\xFF\xFF\xFF")));
-    //    (-18446744073709551616L, "\x3b\xff\xff\xff\xff\xff\xff\xff\xff");
-    //    (-18446744073709551617L, "\xc3\x49\x01\x00\x00\x00\x00\x00\x00\x00\x00");
+
+    {
+        // -18446744073709551616LL too big for 64-bit integer. This value must
+        // be writed as BigInteger. But encoded as 64-bit integer.
+        Value::BigInteger bitInteger;
+
+        bitInteger.positive = false;
+        const char value[] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+        bitInteger.bigint.assign(value, value + sizeof(value));
+
+        BOOST_CHECK_EQUAL(Value(bitInteger), decode(toVector("\x3b\xff\xff\xff\xff\xff\xff\xff\xff")));
+        BOOST_VERIFY(encode(bitInteger) == toVector("\x3b\xff\xff\xff\xff\xff\xff\xff\xff"));
+    }
 
     BOOST_VERIFY(encode(-16) == toVector("\x2F"));
     BOOST_VERIFY(encode(-1) == toVector("\x20"));
@@ -97,8 +106,6 @@ BOOST_AUTO_TEST_CASE( NegativeNumbers )
     BOOST_VERIFY(encode(-65536) == toVector("\x39\xFF\xFF"));
     BOOST_VERIFY(encode(static_cast<int64_t>(-4294967295LL)) == toVector("\x3A\xFF\xFF\xFF\xFE"));
     BOOST_VERIFY(encode(static_cast<int64_t>(-4294967296LL)) == toVector("\x3A\xFF\xFF\xFF\xFF"));
-    //    (-18446744073709551616L, "\x3b\xff\xff\xff\xff\xff\xff\xff\xff");
-    //    (-18446744073709551617L, "\xc3\x49\x01\x00\x00\x00\x00\x00\x00\x00\x00");
 }
 
 BOOST_AUTO_TEST_CASE( FloatNumbers )
@@ -143,17 +150,51 @@ BOOST_AUTO_TEST_CASE( FloatNumbers )
     BOOST_CHECK(encode(0.00006103515625) == toVector("\xf9\x04\x00"));
     BOOST_CHECK(encode(-4.0) == toVector("\xf9\xc4\x00"));
     BOOST_CHECK(encode(-4.1) == toVector("\xfb\xc0\x10\x66\x66\x66\x66\x66\x66"));
-    BOOST_CHECK(encode(1.0 / 0) == toVector("\xf9\x7c\x00")); // Infinity
-    BOOST_CHECK(encode(0.0 / 0) == toVector("\xf9\x7e\x00")); // NaN
-    BOOST_CHECK(encode(-1.0 / 0) == toVector("\xf9\xfc\x00")); // -Infinity
+    BOOST_CHECK(encode(std::numeric_limits<float>::infinity()) == toVector("\xf9\x7c\x00"));
+    BOOST_CHECK(encode(std::numeric_limits<float>::quiet_NaN()) == toVector("\xf9\x7e\x00"));
+    BOOST_CHECK(encode(-std::numeric_limits<float>::infinity()) == toVector("\xf9\xfc\x00"));
+    BOOST_CHECK(encode(std::numeric_limits<double>::infinity()) == toVector("\xf9\x7c\x00"));
+    BOOST_CHECK(encode(std::numeric_limits<double>::quiet_NaN()) == toVector("\xf9\x7e\x00"));
+    BOOST_CHECK(encode(-std::numeric_limits<double>::infinity()) == toVector("\xf9\xfc\x00"));
+}
+
+BOOST_AUTO_TEST_CASE( BigNumbers )
+{
+    {
+        // 18446744073709551617
+        const char bigNumData [] = "\x01\x00\x00\x00\x00\x00\x00\x00\x01";
+        const std::vector<char> bigNumBuf(bigNumData, bigNumData + sizeof(bigNumData) - 1);
+        const char encoded[] = "\xc2\x49\x01\x00\x00\x00\x00\x00\x00\x00\x01";
+        Value::BigInteger bigInteger;
+
+        bigInteger.positive = true;
+        bigInteger.bigint = bigNumBuf;
+
+        BOOST_CHECK_EQUAL(Value(bigInteger), decode(toVector(encoded)));
+        BOOST_CHECK(encode(Value(bigInteger)) == toVector(encoded));
+    }
+
+    {
+        // -18446744073709551617
+        const char bigNumData [] = "\x01\x00\x00\x00\x00\x00\x00\x00\x01";
+        const std::vector<char> bigNumBuf(bigNumData, bigNumData + sizeof(bigNumData) - 1);
+        const char encoded[] = "\xc3\x49\x01\x00\x00\x00\x00\x00\x00\x00\x00";
+        Value::BigInteger bigInteger;
+
+        bigInteger.positive = false;
+        bigInteger.bigint = bigNumBuf;
+
+        BOOST_CHECK_EQUAL(Value(bigInteger), decode(toVector(encoded)));
+        BOOST_CHECK(encode(Value(bigInteger)) == toVector(encoded));
+    }
 }
 
 BOOST_AUTO_TEST_CASE( SimpleValues )
 {
     BOOST_CHECK_EQUAL(false, decode(toVector("\xf4")).toBool());
     BOOST_CHECK_EQUAL(true, decode(toVector("\xf5")).toBool());
-    BOOST_CHECK(decode(toVector("\xf6")).type() == Value::Null);
-    BOOST_CHECK(decode(toVector("\xf7")).type() == Value::Undefined);
+    BOOST_CHECK(decode(toVector("\xf6")).type() == Value::NullType);
+    BOOST_CHECK(decode(toVector("\xf7")).type() == Value::UndefinedType);
     BOOST_CHECK(encode(Value(false)) == toVector("\xf4"));
     BOOST_CHECK(encode(Value(true)) == toVector("\xf5"));
     BOOST_CHECK(encode(Value(Value::NullTag())) == toVector("\xf6"));
@@ -204,12 +245,10 @@ BOOST_AUTO_TEST_CASE( StringValues )
     BOOST_CHECK(encode("IETF") == toVector("\x64\x49\x45\x54\x46"));
     BOOST_CHECK(encode("\"\\") == toVector("\x62\x22\x5c"));
 
-//        | "\u00fc"                     | 0x62c3bc                           |
-//        |                              |                                    |
-//        | "\u6c34"                     | 0x63e6b0b4                         |
-//        |                              |                                    |
-//        | "\ud800\udd51"               | 0x64f0908591                       |
-//        |                              |                                    |
+    BOOST_CHECK(encode("\u00fc") == toVector("\x62\xc3\xbc"));
+    BOOST_CHECK(encode("\u6c34") == toVector("\x63\xe6\xb0\xb4"));
+
+    //        | "\ud800\udd51"               | 0x64f0908591                       |
 }
 
 BOOST_AUTO_TEST_CASE( MapsAndArrayValues )
@@ -321,11 +360,6 @@ BOOST_AUTO_TEST_CASE( MapsAndArrayValues )
         BOOST_CHECK(encode(map) == data);
     }
 
-    //        |                              |                                    |
-    //        | (_ h'0102', h'030405')       | 0x5f42010243030405ff               |
-    //        |                              |                                    |
-    //        | (_ "strea", "ming")          | 0x7f657374726561646d696e67ff       |
-    //        |                              |                                    |
     //        | [_ ]                         | 0x9fff                             |
     //        |                              |                                    |
     //        | [_ 1, [2, 3], [_ 4, 5]]      | 0x9f018202039f0405ffff             |
@@ -343,4 +377,24 @@ BOOST_AUTO_TEST_CASE( MapsAndArrayValues )
     //        |                              |                                    |
     //        | {_ "a": 1, "b": [_ 2, 3]}    | 0xbf61610161629f0203ffff           |
     //        |                              |                                    |
+}
+
+
+BOOST_AUTO_TEST_CASE( BinaryString )
+{
+    {
+        const char binaryData[] = "\0binary string\0";
+        std::vector<char> binaryBuf(binaryData, binaryData + sizeof(binaryData) - 1);
+
+        const char encoded[] = "\x4F\x00\x62\x69\x6E\x61\x72\x79"
+                               "\x20\x73\x74\x72\x69\x6E\x67\x0";
+
+        BOOST_CHECK(encode(binaryBuf) == toVector(encoded));
+        BOOST_CHECK(binaryBuf == decode(toVector(encoded)));
+    }
+//        |                              |                                    |
+//        | (_ h'0102', h'030405')       | 0x5f42010243030405ff               |
+//        |                              |                                    |
+//        | (_ "strea", "ming")          | 0x7f657374726561646d696e67ff       |
+//        |                              |                                    |
 }

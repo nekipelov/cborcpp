@@ -16,7 +16,7 @@
 
 static std::pair<size_t, Value> internalRead(const unsigned char *s, size_t size);
 
-std::pair<size_t, uint64_t> readUnsignedValue(unsigned char minorType, const unsigned char *data, size_t size)
+std::pair<size_t, uint64_t> readIntegerValue(unsigned char minorType, const unsigned char *data, size_t size)
 {
     uint64_t result = 0;
     size_t bytesCount = 0;
@@ -24,7 +24,7 @@ std::pair<size_t, uint64_t> readUnsignedValue(unsigned char minorType, const uns
     switch(minorType)
     {
         case 0x18: {
-            // one-byte uint8_t follows
+            // one byte uint8_t follows
             if( size < 2 )
             {
                 std::cerr << "Unexpected end of data" << std::endl;
@@ -35,7 +35,7 @@ std::pair<size_t, uint64_t> readUnsignedValue(unsigned char minorType, const uns
             break;
         }
         case 0x19: {
-            // two-byte uint16_t follows
+            // two byte uint16_t follows
             if( size < 3 )
             {
                 std::cerr << "Unexpected end of data" << std::endl;
@@ -49,7 +49,7 @@ std::pair<size_t, uint64_t> readUnsignedValue(unsigned char minorType, const uns
             break;
         }
         case 0x1a: {
-            // four-byte uint32_t follows
+            // four byte uint32_t follows
             if( size < 5 )
             {
                 std::cerr << "Unexpected end of data" << std::endl;
@@ -63,7 +63,7 @@ std::pair<size_t, uint64_t> readUnsignedValue(unsigned char minorType, const uns
             break;
         }
         case 0x1b: {
-            // eight-byte uint64_t follows
+            // eight byte uint64_t follows
             if( size < 9 )
             {
                 std::cerr << "Unexpected end of data" << std::endl;
@@ -88,20 +88,40 @@ std::pair<size_t, uint64_t> readUnsignedValue(unsigned char minorType, const uns
     return std::make_pair(bytesCount, result);
 }
 
-std::pair<size_t, Value> readUnsignedInteger(unsigned char minorType, const unsigned char *data, size_t size)
+std::pair<size_t, Value> readPositiveInteger(unsigned char minorType, const unsigned char *data, size_t size)
 {
 
-    return readUnsignedValue(minorType, data, size);
+    return readIntegerValue(minorType, data, size);
 }
 
 std::pair<size_t, Value> readNegativeInteger(unsigned char minorType, const unsigned char *data, size_t size)
 {
-    std::pair<size_t, uint64_t> pair = readUnsignedValue(minorType, data, size);
+    std::pair<size_t, uint64_t> pair = readIntegerValue(minorType, data, size);
 
     if( pair.first != 0 )
-        return std::make_pair(pair.first, Value(-1 - pair.second));
+    {
+        uint64_t value = pair.second;
+        if( value == 0xffffffffffffffff )
+        {
+            // 18446744073709551617
+            const char bigNumData [] = "\x01\x00\x00\x00\x00\x00\x00\x00\x00";
+            Value::BigInteger bigInteger;
+
+            bigInteger.positive = false;
+            bigInteger.bigint.assign(bigNumData, bigNumData + sizeof(bigNumData) - 1);
+
+            return std::make_pair(pair.first, Value(bigInteger));
+
+        }
+        else
+        {
+            return std::make_pair(pair.first, Value(value + 1, false));
+        }
+    }
     else
+    {
         return pair;
+    }
 
 }
 
@@ -150,7 +170,6 @@ std::pair<size_t, Value> simpleOrFloat(unsigned char minorType, const unsigned c
                 value = -value;
 
             return std::make_pair(3, Value(value));
-            break;
         }
         case SinglePrecisionFloat: {
             if( size < 5 )
@@ -168,7 +187,6 @@ std::pair<size_t, Value> simpleOrFloat(unsigned char minorType, const unsigned c
             buf.u32 = be32toh(buf.u32);
 
             return std::make_pair(5, Value(buf.value));
-            break;
         }
         case DoublePrecisionFloat: {
             if( size < 9 )
@@ -186,23 +204,23 @@ std::pair<size_t, Value> simpleOrFloat(unsigned char minorType, const unsigned c
             buf.u64 = be64toh(buf.u64);
 
             return std::make_pair(9, Value(buf.value));
-            break;
         }
     }
 
-    assert(false);
     std::cerr << "Internal error: invalid minor type " << static_cast<int>(minorType)
               << " for simple value" << std::endl;
+    assert(false);
 
     return std::make_pair(0, Value());
 }
 
-std::pair<size_t, Value> readString(uint8_t minorType, const unsigned char *data, size_t size)
+std::pair<size_t, Value> readByteString(uint8_t minorType, const unsigned char *data, size_t size)
 {
     if( minorType == 0x1f )  // todo: 0xff break string
         abort();
 
-    std::pair<size_t, uint64_t> pair = readUnsignedValue(minorType, data, size);
+    std::pair<size_t, uint64_t> pair = readIntegerValue(minorType, data, size);
+    size_t length = pair.second;
 
     if( pair.first == 0 )
     {
@@ -210,9 +228,41 @@ std::pair<size_t, Value> readString(uint8_t minorType, const unsigned char *data
         return std::make_pair(pair.first, Value(""));
     }
 
-    const char *ptr = reinterpret_cast<const char *>(data);
+    if( length > pair.first + size )
+    {
+        std::cerr << "Unexpected end of data" << std::endl;
+        return std::make_pair(0, Value());
+    }
 
-    return std::make_pair(pair.first + pair.second, std::string(ptr + pair.first, ptr + pair.first + pair.second));
+    const char *ptr = reinterpret_cast<const char *>(data + pair.first);
+    std::vector<char> buf(ptr, ptr + length);
+
+    return std::make_pair(pair.first + pair.second, buf);
+}
+
+std::pair<size_t, Value> readString(uint8_t minorType, const unsigned char *data, size_t size)
+{
+    if( minorType == 0x1f )  // todo: 0xff break string
+        abort();
+
+    std::pair<size_t, uint64_t> pair = readIntegerValue(minorType, data, size);
+    size_t length = pair.second;
+
+    if( pair.first == 0 )
+    {
+        // empty string?
+        return std::make_pair(pair.first, Value(""));
+    }
+
+    if( length > pair.first + size )
+    {
+        std::cerr << "Unexpected end of data" << std::endl;
+        return std::make_pair(0, Value());
+    }
+
+    const char *ptr = reinterpret_cast<const char *>(data + pair.first);
+
+    return std::make_pair(pair.first + pair.second, std::string(ptr, ptr + length));
 }
 
 std::pair<size_t, Value> readArray(uint8_t minorType, const unsigned char *data, size_t size)
@@ -220,7 +270,7 @@ std::pair<size_t, Value> readArray(uint8_t minorType, const unsigned char *data,
     if( minorType == 0x1f )  // todo: 0xff break array
         abort();
 
-    std::pair<size_t, uint64_t> pair = readUnsignedValue(minorType, data, size);
+    std::pair<size_t, uint64_t> pair = readIntegerValue(minorType, data, size);
     size_t offset = pair.first;
 
     if( pair.first == 0 )
@@ -255,7 +305,7 @@ std::pair<size_t, Value> readMap(uint8_t minorType, const unsigned char *data, s
     if( minorType == 0x1f )  // todo: 0xff break array
         abort();
 
-    std::pair<size_t, uint64_t> pair = readUnsignedValue(minorType, data, size);
+    std::pair<size_t, uint64_t> pair = readIntegerValue(minorType, data, size);
     size_t offset = pair.first;
 
     if( pair.first == 0 )
@@ -289,6 +339,70 @@ std::pair<size_t, Value> readMap(uint8_t minorType, const unsigned char *data, s
     return std::make_pair(offset, result);
 }
 
+std::pair<size_t, Value> readBignum(const unsigned char *data, size_t size, bool positive)
+{
+    Value::BigInteger bigInteger;
+    std::pair<size_t, Value> pair = internalRead(data, size);
+
+    if( pair.first == 0 )
+    {
+        // fail?
+        return std::make_pair(pair.first, Value());
+    }
+
+    std::vector<char> binaryString = pair.second.toByteString();
+
+    if( !positive )
+    {
+        for(size_t i = binaryString.size(); i != 0 ; --i)
+        {
+            unsigned char c = static_cast<unsigned char>(binaryString[i - 1]);
+            if( c == 0xff )
+            {
+                binaryString[i - 1] = 0;
+            }
+            else
+            {
+                binaryString[i - 1] = c + 1u;
+                break;
+            }
+        }
+    }
+
+    bigInteger.positive = positive;
+    bigInteger.bigint.assign(binaryString.begin(), binaryString.end());
+
+
+    return std::make_pair(pair.first, bigInteger);
+}
+
+
+std::pair<size_t, Value> readTagger(uint8_t minorType, const unsigned char *data, size_t size)
+{
+    switch(minorType)
+    {
+        case TextBasedDateTime:
+            break;
+        case EpochBasedDateTime:
+            break;
+        case PositiveBignum:
+            return readBignum(data + 1, size - 1, true);
+            break;
+        case NegativeBignum:
+            return readBignum(data + 1, size - 1, false);
+            break;
+        case DecimalFraction:
+            break;
+        case BigFloat:
+            break;
+    }
+
+    std::cerr << "Internal error: invalid minor type for tagger value"
+              << static_cast<int>(minorType) << std::endl;
+    assert(false);
+
+    return std::make_pair(0, Value());
+}
 
 static std::pair<size_t, Value> internalRead(const unsigned char *data, size_t size)
 {
@@ -299,14 +413,15 @@ static std::pair<size_t, Value> internalRead(const unsigned char *data, size_t s
     {
         case UnsignedInt:
             // Unsigned integer
-            return readUnsignedInteger(minorType, data, size + 1);
+            return readPositiveInteger(minorType, data, size + 1);
             break;
         case NegativeInt:
             // Negative integer
             return readNegativeInteger(minorType, data, size + 1);
             break;
         case Bytes:
-            // String
+            // Byte string
+            return readByteString(minorType, data, size + 1);
             break;
         case Utf8String:
             // Utf-8 string
@@ -322,6 +437,7 @@ static std::pair<size_t, Value> internalRead(const unsigned char *data, size_t s
             break;
         case Tag:
             // Tagged
+            return readTagger(minorType, data, size + 1);
             break;
         case Prim:
             // Simple or float
@@ -329,9 +445,9 @@ static std::pair<size_t, Value> internalRead(const unsigned char *data, size_t s
             break;
     }
 
-    assert(false);
     std::cerr << "Internal error: invalid type " << static_cast<int>(majorType) << " "
               << static_cast<int>(minorType) << std::endl;
+    assert(false);
 
     return std::make_pair(0, Value());
 }

@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <list>
+#include <ostream>
 
 #include <boost/variant.hpp>
 
@@ -17,14 +19,17 @@
 class Value {
 public:
     enum Type {
-        Null,
-        Undefined,
-        Bool,
-        Integer,
-        Double,
-        String,
-        Array,
-        Map
+        NullType,
+        UndefinedType,
+        BoolType,
+        PositiveIntegerType,
+        NegativeIntegerType,
+        DoubleType,
+        StringType,
+        ByteStringType,
+        ArrayType,
+        MapType,
+        BigIntegerType
     };
 
     struct NullTag {
@@ -47,19 +52,40 @@ public:
         }
     };
 
+    struct BigInteger {
+        bool positive;
+        std::vector<char> bigint; // Warning: big-endian byte order.
+
+        bool operator == (const BigInteger &other) const {
+            return positive == other.positive && bigint == other.bigint;
+        }
+
+        bool operator < (const BigInteger &other) const {
+            if( positive == other.positive )
+            {
+                return bigint < other.bigint;
+            }
+            else
+            {
+                return positive < other.positive;
+            }
+        }
+    };
+
     Value();
     Value(NullTag);
     Value(UndefinedTag);
     Value(bool v);
-    Value(int32_t i);
-    Value(uint32_t i);
+    Value(int i);
     Value(int64_t i);
-    Value(uint64_t i);
+    Value(uint64_t i, bool positive = true);
     Value(double d);
     Value(const std::string &s);
+    Value(const std::vector<char> &bs);
     Value(const char *s);
     Value(const std::vector<Value> &vec);
     Value(const std::map<Value, Value> &map);
+    Value(const BigInteger &bigint);
 
     static Value null();
     static Value undefiend();
@@ -67,19 +93,24 @@ public:
     bool isNull() const;
     bool isUndefined() const;
     bool isBool() const;
-    bool isInt() const;
+    bool isPositiveInteger() const;
+    bool isNegativeInteger() const;
     bool isDouble() const;
     bool isString() const;
+    bool isByteString() const;
     bool isArray() const;
     bool isMap() const;
+    bool isBigInteger() const;
 
     bool toBool() const;
-    int toInt() const;
-    int64_t toInt64() const;
+    uint64_t toPositiveInteger() const;
+    uint64_t toNegativeInteger() const;
     double toDouble() const;
     std::string toString() const;
+    std::vector<char> toByteString() const;
     std::vector<Value> toArray() const;
     std::map<Value, Value> toMap() const;
+    BigInteger toBigInteger() const;
 
     Type type() const;
     std::string inspect() const;
@@ -101,8 +132,34 @@ protected:
     bool typeEq() const;
 
 private:
-    boost::variant<NullTag, UndefinedTag, bool, int64_t, double, std::string, std::vector<Value>,
-                   std::map<Value, Value> > value;
+
+    struct PositiveInteger
+    {
+        bool operator == (const PositiveInteger &other) const {
+            return value == other.value;
+        }
+
+        bool operator < (const PositiveInteger &other) const {
+            return value < other.value;
+        }
+
+        uint64_t value;
+    };
+
+    struct NegativeInteger
+    {
+        bool operator == (const NegativeInteger &other) const {
+            return value == other.value;
+        }
+
+        bool operator < (const NegativeInteger &other) const {
+            return value < other.value;
+        }
+        uint64_t value;
+    };
+
+    boost::variant<NullTag, UndefinedTag, bool, PositiveInteger, NegativeInteger, double, std::string, std::vector<char>,
+                   std::vector<Value>, std::map<Value, Value>, BigInteger > value;
 
     friend bool operator < (const Value &lhs, const Value &rhs);
     friend bool operator == (const Value &lhs, const Value &rhs);
@@ -144,7 +201,6 @@ template<typename T>
 Value Value::convertFrom(const std::list<T> &list)
 {
     std::vector<Value> result;
-
     std::copy(list.begin(), list.end(), std::back_inserter(result));
     return result;
 }

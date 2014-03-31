@@ -12,11 +12,18 @@
 #include "cborprivate.h"
 #include "cborwriter.h"
 
+static const int positiveIntegerStart = 0x00;
 static const int negativeIntegerStart = 0x20;
 static const int byteStringStart = 0x40;
 static const int utf8StringStart = 0x60;
 static const int arrayStart = 0x80;
 static const int mapStart = 0xa0;
+static const int taggedStart = 0xc0;
+static const int textBasedDateTime = taggedStart;      // 0xc0
+static const int epochBasedDateTime = taggedStart + 1; // 0xc1
+static const int positiveBignum = taggedStart + 2;     // 0xc2
+static const int negativeBignum = taggedStart + 3;     // 0xc3
+//...
 static const int simpleStart = 0xe0;
 static const int halfPrecisionFloat = simpleStart + 0x19;   // 0xf9
 static const int singlePrecisionFloat = simpleStart + 0x1a; // 0xfa
@@ -106,23 +113,32 @@ static void writeInteger(std::vector<char> &buff, uint64_t value, int type)
     }
 }
 
-static void writeInteger(std::vector<char> &buff, const Value &value)
+static void writePositiveInteger(std::vector<char> &buff, const Value &value)
 {
-    int64_t i = value.toInt64();
+    uint64_t i = value.toPositiveInteger();
 
     if( i > 0 )
     {
-        writeInteger(buff, i, false);
-    }
-    else if( i < 0 )
-    {
-        uint64_t ui = i ^ (i >> 63);
-        writeInteger(buff, ui, negativeIntegerStart);
+        writeInteger(buff, i, positiveIntegerStart);
     }
     else
     {
         const char zero = 0;
         buff.push_back(zero);
+    }
+}
+
+static void writeNegativeInteger(std::vector<char> &buff, const Value &value)
+{
+    uint64_t i = value.toNegativeInteger();
+
+    if( i == 0 )
+    {
+        writeInteger(buff, 0xFFFFFFFFFFFFFFFF, negativeIntegerStart);
+    }
+    else
+    {
+        writeInteger(buff, i - 1, negativeIntegerStart);
     }
 }
 
@@ -135,6 +151,16 @@ static void writeString(std::vector<char> &buff, const Value &value)
     buff.insert(buff.end(), s.begin(), s.end());
 }
 
+static void writeByteString(std::vector<char> &buff, const Value &value)
+{
+    const std::vector<char> &data = value.toByteString();
+
+    writeInteger(buff, data.size(), byteStringStart);
+
+    buff.insert(buff.end(), data.begin(), data.end());
+}
+
+
 static void writeDouble(std::vector<char> &buff, const Value &value)
 {
     double dv = value.toDouble();
@@ -142,6 +168,8 @@ static void writeDouble(std::vector<char> &buff, const Value &value)
 
     if( fv == dv )
     {
+        // Warning: code from MessagePack
+
         union {
             float f;
             uint32_t ui32;
@@ -159,25 +187,26 @@ static void writeDouble(std::vector<char> &buff, const Value &value)
             {
                 ;
             }
-            else if (exponent >= 113 && exponent <= 142) /* normalized */
+            else if (exponent >= 113 && exponent <= 142)
             {
+                // normalized
                 s16 += ((exponent - 112) << 10) + (mantissa >> 13);
             }
             else if (exponent >= 103 && exponent < 113)
             {
-                /* denorm, exp16 = 0 */
+                // denorm, exp16 = 0
                 if (mantissa & ((1 << (126 - exponent)) - 1))
-                    goto float32;         /* loss of precision */
+                    goto float32; // loss of precision
                 s16 += ((mantissa + 0x800000) >> (126 - exponent));
             }
             else if (exponent == 255 && mantissa == 0)
             {
-                /* Inf */
+                // Inf
                 s16 += 0x7c00;
             }
             else
             {
-                goto float32;           /* loss of range */
+                goto float32;  // loss of range
             }
 
             s16 = htobe16(s16);
@@ -267,33 +296,110 @@ static void writeMap(std::vector<char> &buff, const Value &value)
     }
 }
 
+static void writeBigInteger(std::vector<char> &buff, const Value &value)
+{
+    Value::BigInteger bigInteger = value.toBigInteger();
+
+    bool canBeWrittenAs64BitInteger = bigInteger.bigint.size() < 9;
+    canBeWrittenAs64BitInteger = canBeWrittenAs64BitInteger || (
+                                    bigInteger.bigint.size() == 9 &&
+                                    bigInteger.bigint[8] == 0 &&
+                                    bigInteger.bigint[7] == 0 &&
+                                    bigInteger.bigint[6] == 0 &&
+                                    bigInteger.bigint[5] == 0 &&
+                                    bigInteger.bigint[4] == 0 &&
+                                    bigInteger.bigint[3] == 0 &&
+                                    bigInteger.bigint[2] == 0 &&
+                                    bigInteger.bigint[1] == 0 &&
+                                    bigInteger.bigint[0] == 1 &&
+                                    bigInteger.positive == false);
+
+    if(canBeWrittenAs64BitInteger)
+    {
+        // This number can be written as integer value.
+
+        if( bigInteger.bigint.size() == 9 )
+        {
+            writeInteger(buff, 0xFFFFFFFFFFFFFFFF, negativeIntegerStart);
+        }
+        else
+        {
+            uint64_t ui = 0;
+
+            for(size_t i = 0; i < bigInteger.bigint.size(); ++i)
+                ui = bigInteger.bigint[i] + (ui << 8);
+
+            if( bigInteger.positive)
+                writeInteger(buff, ui, positiveIntegerStart);
+            else
+                writeInteger(buff, ui - 1, negativeIntegerStart);
+        }
+    }
+    else
+    {
+        if( bigInteger.positive )
+        {
+            buff.push_back(positiveBignum);
+        }
+        else
+        {
+            buff.push_back(negativeBignum);
+
+            for(size_t i = bigInteger.bigint.size(); i != 0 ; --i)
+            {
+                unsigned char c = bigInteger.bigint[i - 1];
+                if( c != 0 )
+                {
+                    bigInteger.bigint[i - 1] = c - 1u;
+                    break;
+                }
+                else
+                {
+                    bigInteger.bigint[i - 1] = 0xff;
+                }
+            }
+        }
+
+        writeByteString(buff, Value(bigInteger.bigint));
+    }
+}
+
 static void cborWriteInternal(std::vector<char> &buff, const Value &value)
 {
     switch(value.type())
     {
-    case Value::Null:
+    case Value::NullType:
         writeNull(buff);
         break;
-    case Value::Undefined:
+    case Value::UndefinedType:
         writeUndefined(buff);
         break;
-    case Value::Bool:
+    case Value::BoolType:
         writeBool(buff, value);
         break;
-    case Value::Integer:
-        writeInteger(buff, value);
+    case Value::NegativeIntegerType:
+        writeNegativeInteger(buff, value);
         break;
-    case Value::Double:
+    case Value::PositiveIntegerType:
+        writePositiveInteger(buff, value);
+        break;
+    case Value::DoubleType:
         writeDouble(buff, value);
         break;
-    case Value::String:
+    case Value::StringType:
         writeString(buff, value);
         break;
-    case Value::Array:
+    case Value::ByteStringType:
+        writeByteString(buff, value);
+        break;
+    case Value::ArrayType:
         writeArray(buff, value);
         break;
-    case Value::Map:
+    case Value::MapType:
         writeMap(buff, value);
+        break;
+    case Value::BigIntegerType:
+        writeBigInteger(buff, value);
         break;
     default:
         assert(false);
