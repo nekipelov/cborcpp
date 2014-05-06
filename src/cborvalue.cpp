@@ -4,32 +4,125 @@
  */
 
 #include <limits>
+
 #include <boost/lexical_cast.hpp>
+#include <boost/optional.hpp>
 
-#include "value.h"
+#include "cborvalue.h"
 
-Value::Value()
+struct ValueSizeVisitor : public boost::static_visitor<size_t>
+{
+    size_t operator()(const std::vector<CborValue> &arr) const
+    {
+        return arr.size();
+    }
+    size_t operator()(const std::map<CborValue, CborValue> &map) const
+    {
+        return map.size();
+    }
+
+    template<typename T>
+    size_t operator()(const T &) const
+    {
+        //return 0;
+        throw std::runtime_error( "CborValue: invalid type");
+    }
+};
+
+struct ValueHasMemberVisitor : public boost::static_visitor<bool>
+{
+    ValueHasMemberVisitor(const CborValue &key)
+        : key(key)
+    {}
+
+    bool operator()(const std::map<CborValue, CborValue> &map) const
+    {
+        return map.find(key) != map.end();
+    }
+
+    template<typename T>
+    bool operator()(const T &) const
+    {
+        //return false;
+        throw std::runtime_error( "CborValue: invalid type");
+    }
+
+    const CborValue &key;
+};
+
+struct ValueGetMemberVisitor : public boost::static_visitor<CborValue>
+{
+    ValueGetMemberVisitor(const CborValue &key)
+        : key(key)
+    {}
+
+    CborValue operator()(const std::map<CborValue, CborValue> &map) const
+    {
+        std::map<CborValue, CborValue>::const_iterator it = map.find(key);
+
+        if( it != map.end() )
+            return it->second;
+//        else
+//            return CborValue::null();
+
+        throw std::runtime_error( "CborValue: invalid type");
+    }
+
+    template<typename T>
+    CborValue operator()(const T &) const
+    {
+        //return CborValue::null();
+        throw std::runtime_error( "CborValue: invalid type");
+    }
+
+    const CborValue &key;
+};
+
+struct ValueGetArrayItemVisitor : public boost::static_visitor<CborValue>
+{
+    ValueGetArrayItemVisitor(size_t index)
+        : index(index)
+    {}
+
+    CborValue operator()(const std::vector<CborValue> &arr) const
+    {
+        if( index < arr.size() )
+            return arr[index];
+        else
+            return CborValue::null();
+    }
+
+    template<typename T>
+    CborValue operator()(const T &) const
+    {
+        return CborValue::null();
+    }
+
+    const size_t index;
+};
+
+CborValue::CborValue()
     : value(NullTag())
 {
 }
 
-Value::Value(NullTag)
+CborValue::CborValue(NullTag)
     :  value(NullTag())
 {
 }
 
-Value::Value(UndefinedTag)
+CborValue::CborValue(UndefinedTag)
     :  value(UndefinedTag())
 {
 }
 
 
-Value::Value(bool b)
+CborValue::CborValue(bool b)
     : value(b)
 {
 }
 
-Value::Value(int i)
+CborValue::CborValue(int i)
 {
     if( i >= 0 )
     {
@@ -43,7 +136,7 @@ Value::Value(int i)
     }
 }
 
-Value::Value(int64_t i)
+CborValue::CborValue(int64_t i)
 {
     if( i >= 0 )
     {
@@ -57,7 +150,7 @@ Value::Value(int64_t i)
     }
 }
 
-Value::Value(uint64_t i, bool positive)
+CborValue::CborValue(uint64_t i, bool positive)
 {
     if( positive )
     {
@@ -71,147 +164,157 @@ Value::Value(uint64_t i, bool positive)
     }
 }
 
-Value::Value(double d)
+CborValue::CborValue(double d)
     : value(d)
 {
 }
 
-Value::Value(const std::string &s)
+CborValue::CborValue(const std::string &s)
     : value(s)
 {
 }
 
-Value::Value(const std::vector<char> &bs)
+CborValue::CborValue(const std::vector<char> &bs)
     : value(bs)
 {
 }
 
-Value::Value(const char *s)
+CborValue::CborValue(const char *s)
     : value(std::string(s))
 {
 }
 
-Value::Value(const std::vector<Value> &vec)
+CborValue::CborValue(const std::vector<CborValue> &vec)
     : value(vec)
 {
 }
 
-Value::Value(const std::map<Value, Value> &map)
+CborValue::CborValue(const std::map<CborValue, CborValue> &map)
     : value(map)
 {
 }
 
-Value::Value(const BigInteger &bigint)
+CborValue::CborValue(const BigInteger &bigint)
     : value(bigint)
 {
 }
 
-bool Value::isNull() const
+CborValue CborValue::null()
+{
+    return CborValue(NullTag());
+}
+
+CborValue CborValue::undefiend()
+{
+    return CborValue(UndefinedTag());
+}
+
+bool CborValue::isNull() const
 {
     return type() == NullType;
 }
 
-bool Value::isUndefined() const
+bool CborValue::isUndefined() const
 {
     return type() == UndefinedType;
 }
 
-bool Value::isBool() const
+bool CborValue::isBool() const
 {
     return type() == BoolType;
 }
 
-bool Value::isPositiveInteger() const
+bool CborValue::isPositiveInteger() const
 {
     return type() == PositiveIntegerType;
 }
 
-bool Value::isNegativeInteger() const
+bool CborValue::isNegativeInteger() const
 {
     return type() == NegativeIntegerType;
 }
 
-bool Value::isDouble() const
+bool CborValue::isDouble() const
 {
     return type() == DoubleType;
 }
 
-bool Value::isString() const
+bool CborValue::isString() const
 {
     return type() == StringType;
 }
 
-bool Value::isByteString() const
+bool CborValue::isByteString() const
 {
     return type() == ByteStringType;
 }
 
-bool Value::isArray() const
+bool CborValue::isArray() const
 {
     return type() == ArrayType;
 }
 
-bool Value::isMap() const
+bool CborValue::isMap() const
 {
     return type() == MapType;
 }
 
-bool Value::isBigInteger() const
+bool CborValue::isBigInteger() const
 {
     return type() == BigIntegerType;
 }
 
-bool Value::toBool() const
+bool CborValue::toBool() const
 {
     return castTo<bool>();
 }
 
-uint64_t Value::toPositiveInteger() const
+uint64_t CborValue::toPositiveInteger() const
 {
     return castTo<PositiveInteger>().value;
 }
 
-uint64_t Value::toNegativeInteger() const
+uint64_t CborValue::toNegativeInteger() const
 {
     return castTo<NegativeInteger>().value;
 }
 
-double Value::toDouble() const
+double CborValue::toDouble() const
 {
     return castTo<double>();
 }
 
-std::string Value::toString() const
+std::string CborValue::toString() const
 {
     return castTo<std::string>();
 }
 
-std::vector<char> Value::toByteString() const
+std::vector<char> CborValue::toByteString() const
 {
     return castTo< std::vector<char> >();
 }
 
-std::vector<Value> Value::toArray() const
+std::vector<CborValue> CborValue::toArray() const
 {
-    return castTo< std::vector<Value> >();
+    return castTo< std::vector<CborValue> >();
 }
 
-std::map<Value, Value> Value::toMap() const
+std::map<CborValue, CborValue> CborValue::toMap() const
 {
-    return castTo< std::map<Value, Value> >();
+    return castTo< std::map<CborValue, CborValue> >();
 }
 
-Value::BigInteger Value::toBigInteger() const
+CborValue::BigInteger CborValue::toBigInteger() const
 {
     return castTo<BigInteger>();
 }
 
-Value::Type Value::type() const
+CborValue::Type CborValue::type() const
 {
-    return static_cast<Value::Type>(value.which());
+    return static_cast<CborValue::Type>(value.which());
 }
 
-std::string Value::inspect() const
+std::string CborValue::inspect() const
 {
     if( isNull() )
     {
@@ -273,7 +376,7 @@ std::string Value::inspect() const
     }
     else if( isArray() )
     {
-        std::vector<Value> values = toArray();
+        std::vector<CborValue> values = toArray();
         std::string result = "[";
 
         if( values.empty() == false )
@@ -296,13 +399,13 @@ std::string Value::inspect() const
     }
     else if( isMap() )
     {
-        std::map<Value, Value> values = toMap();
+        std::map<CborValue, CborValue> values = toMap();
         std::string result = "{";
 
         if( values.empty() == false )
         {
-            std::map<Value, Value>::iterator it = values.begin();
-            std::map<Value, Value>::iterator end = values.end();
+            std::map<CborValue, CborValue>::iterator it = values.begin();
+            std::map<CborValue, CborValue>::iterator end = values.end();
 
             for(; it != end; ++it)
             {
@@ -361,12 +464,238 @@ std::string Value::inspect() const
     return invalidType;
 }
 
-bool operator < (const Value &lhs, const Value &rhs)
+size_t CborValue::size() const
+{
+    return boost::apply_visitor(ValueSizeVisitor(), value);
+}
+
+bool CborValue::isEmpty() const
+{
+    return size() == 0;
+}
+
+bool CborValue::hasMember(const CborValue &key) const
+{
+    return boost::apply_visitor(ValueHasMemberVisitor(key), value);
+}
+
+CborValue CborValue::member(const CborValue &key) const
+{
+    return boost::apply_visitor(ValueGetMemberVisitor(key), value);
+}
+
+CborValue CborValue::at(size_t arrayIndex) const
+{
+    return boost::apply_visitor(ValueGetArrayItemVisitor(arrayIndex), value);
+}
+
+bool operator < (const CborValue &lhs, const CborValue &rhs)
 {
     return lhs.value < rhs.value;
 }
 
-bool operator == (const Value &lhs, const Value &rhs)
+bool operator == (const CborValue &lhs, const CborValue &rhs)
 {
     return lhs.value == rhs.value;
+}
+
+class CborValue::IteratorImpl
+{
+public:
+    IteratorImpl(const std::map<CborValue, CborValue> &container)
+        : type(Map), map(container), mapIteratorPos(container.begin()),
+          mapIteratorVal(container.end())
+    {
+    }
+
+    IteratorImpl(const std::vector<CborValue> &container)
+        : type(Array), array(container), arrayIteratorPos(container.begin()),
+          arrayIteratorVal(container.end())
+    {
+    }
+
+    enum {
+        Invalid,
+        Array,
+        Map
+    } type;
+
+    boost::optional<const std::map<CborValue, CborValue> &> map;
+    boost::optional<const std::vector<CborValue> &> array;
+
+    std::map<CborValue, CborValue>::const_iterator mapIteratorPos;
+    std::map<CborValue, CborValue>::const_iterator mapIteratorVal;
+    std::vector<CborValue>::const_iterator arrayIteratorPos;
+    std::vector<CborValue>::const_iterator arrayIteratorVal;
+};
+
+
+CborValue::Iterator::Iterator(const CborValue &value)
+{
+    switch(value.type())
+    {
+    case CborValue::ArrayType:
+        pimpl.reset(new IteratorImpl(boost::get< std::vector<CborValue> >(value.value)));
+        break;
+    case CborValue::MapType:
+        pimpl.reset(new IteratorImpl(boost::get< std::map<CborValue, CborValue> >(value.value)));
+        break;
+    default:
+        break;
+    }
+}
+
+CborValue::Iterator::~Iterator()
+{
+}
+
+bool CborValue::Iterator::hasNext() const
+{
+    if( pimpl->type == CborValue::IteratorImpl::Array )
+    {
+        return pimpl->arrayIteratorPos != pimpl->array->end();
+    }
+    else if( pimpl->type == CborValue::IteratorImpl::Map )
+    {
+        return pimpl->mapIteratorPos != pimpl->map->end();
+    }
+    else
+    {
+        return false;
+    }
+}
+
+bool CborValue::Iterator::hasPrev() const
+{
+    if( pimpl->type == CborValue::IteratorImpl::Array )
+        return pimpl->arrayIteratorPos != pimpl->array->begin();
+    else if( pimpl->type == CborValue::IteratorImpl::Map )
+        return pimpl->mapIteratorPos != pimpl->map->begin();
+    else
+        return false;
+}
+
+CborValue CborValue::Iterator::next()
+{
+    if( hasNext() )
+    {
+        if( pimpl->type == CborValue::IteratorImpl::Array )
+        {
+            if( pimpl->arrayIteratorPos != pimpl->array->end() )
+            {
+                pimpl->arrayIteratorVal = pimpl->arrayIteratorPos++;
+                return *(pimpl->arrayIteratorVal);
+            }
+            else
+            {
+                return CborValue::null();
+            }
+        }
+        else if( pimpl->type == CborValue::IteratorImpl::Map )
+        {
+            if( pimpl->mapIteratorPos != pimpl->map->end() )
+            {
+                pimpl->mapIteratorVal = pimpl->mapIteratorPos++;
+                return pimpl->mapIteratorVal->second;
+            }
+            else
+            {
+                return CborValue::null();
+            }
+        }
+    }
+
+    return CborValue::null();
+}
+
+CborValue CborValue::Iterator::prev()
+{
+    if( pimpl->type == CborValue::IteratorImpl::Array )
+    {
+        if( pimpl->arrayIteratorPos != pimpl->array->begin() )
+        {
+            pimpl->arrayIteratorVal = pimpl->arrayIteratorPos--;
+            return *(pimpl->arrayIteratorVal);
+        }
+        else
+        {
+            return CborValue::null();
+        }
+    }
+    else if( pimpl->type == CborValue::IteratorImpl::Map )
+    {
+        if( pimpl->mapIteratorPos != pimpl->map->begin() )
+        {
+            pimpl->mapIteratorVal = pimpl->mapIteratorPos--;
+            return pimpl->mapIteratorVal->second;
+        }
+        else
+        {
+            return CborValue::null();
+        }
+    }
+    else
+    {
+        return CborValue::null();
+    }
+}
+
+CborValue CborValue::Iterator::key() const
+{
+    if( pimpl->type == CborValue::IteratorImpl::Array )
+    {
+        if( pimpl->arrayIteratorVal != pimpl->array->end() )
+        {
+            return CborValue(std::distance(pimpl->array->begin(), pimpl->arrayIteratorVal));
+        }
+        else
+        {
+            return CborValue::null();
+        }
+    }
+    else if( pimpl->type == CborValue::IteratorImpl::Map )
+    {
+        if( pimpl->mapIteratorVal != pimpl->map->end() )
+        {
+            return pimpl->mapIteratorVal->first;
+        }
+        else
+        {
+            return CborValue::null();
+        }
+    }
+    else
+    {
+        return CborValue::null();
+    }
+}
+
+CborValue CborValue::Iterator::value() const
+{
+    if( pimpl->type == CborValue::IteratorImpl::Array )
+    {
+        if( pimpl->arrayIteratorVal != pimpl->array->end() )
+        {
+            return *pimpl->arrayIteratorVal;
+        }
+        else
+        {
+            return CborValue::null();
+        }
+    }
+    else if( pimpl->type == CborValue::IteratorImpl::Map )
+    {
+        if( pimpl->mapIteratorVal != pimpl->map->end() )
+        {
+            return pimpl->mapIteratorVal->second;
+        }
+        else
+        {
+            return CborValue::null();
+        }
+    }
+    else
+    {
+        return CborValue::null();
+    }
 }

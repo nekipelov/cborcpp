@@ -14,7 +14,7 @@
 #include "cborprivate.h"
 #include "cborreader.h"
 
-static std::pair<size_t, Value> internalRead(const unsigned char *s, size_t size);
+static std::pair<size_t, CborValue> internalRead(const unsigned char *s, size_t size);
 
 std::pair<size_t, uint64_t> readIntegerValue(unsigned char minorType, const unsigned char *data, size_t size)
 {
@@ -88,13 +88,13 @@ std::pair<size_t, uint64_t> readIntegerValue(unsigned char minorType, const unsi
     return std::make_pair(bytesCount, result);
 }
 
-std::pair<size_t, Value> readPositiveInteger(unsigned char minorType, const unsigned char *data, size_t size)
+std::pair<size_t, CborValue> readPositiveInteger(unsigned char minorType, const unsigned char *data, size_t size)
 {
 
     return readIntegerValue(minorType, data, size);
 }
 
-std::pair<size_t, Value> readNegativeInteger(unsigned char minorType, const unsigned char *data, size_t size)
+std::pair<size_t, CborValue> readNegativeInteger(unsigned char minorType, const unsigned char *data, size_t size)
 {
     std::pair<size_t, uint64_t> pair = readIntegerValue(minorType, data, size);
 
@@ -105,17 +105,17 @@ std::pair<size_t, Value> readNegativeInteger(unsigned char minorType, const unsi
         {
             // 18446744073709551617
             const char bigNumData [] = "\x01\x00\x00\x00\x00\x00\x00\x00\x00";
-            Value::BigInteger bigInteger;
+            CborValue::BigInteger bigInteger;
 
             bigInteger.positive = false;
             bigInteger.bigint.assign(bigNumData, bigNumData + sizeof(bigNumData) - 1);
 
-            return std::make_pair(pair.first, Value(bigInteger));
+            return std::make_pair(pair.first, CborValue(bigInteger));
 
         }
         else
         {
-            return std::make_pair(pair.first, Value(value + 1, false));
+            return std::make_pair(pair.first, CborValue(value + 1, false));
         }
     }
     else
@@ -125,20 +125,20 @@ std::pair<size_t, Value> readNegativeInteger(unsigned char minorType, const unsi
 
 }
 
-std::pair<size_t, Value> simpleOrFloat(unsigned char minorType, const unsigned char *data, size_t size)
+std::pair<size_t, CborValue> simpleOrFloat(unsigned char minorType, const unsigned char *data, size_t size)
 {
     switch (minorType) {
         case FalseValue:
-            return std::make_pair(1, Value(false));
+            return std::make_pair(1, CborValue(false));
             break;
         case TrueValue:
-            return std::make_pair(1, Value(true));
+            return std::make_pair(1, CborValue(true));
             break;
         case NullValue:
-            return std::make_pair(1, Value(Value::NullTag()));
+            return std::make_pair(1, CborValue(CborValue::NullTag()));
             break;
         case UndefiendValue:
-            return std::make_pair(1, Value(Value::UndefinedTag()));
+            return std::make_pair(1, CborValue(CborValue::UndefinedTag()));
             break;
         case SimpleValue1Byte:
             // TODO
@@ -148,7 +148,7 @@ std::pair<size_t, Value> simpleOrFloat(unsigned char minorType, const unsigned c
             if( size < 3 )
             {
                 std::cerr << "Unexpected end of data" << std::endl;
-                return std::make_pair(0, Value());
+                return std::make_pair(0, CborValue());
             }
 
             // adapte from code in rfc7049, Appendix D.
@@ -169,13 +169,13 @@ std::pair<size_t, Value> simpleOrFloat(unsigned char minorType, const unsigned c
             if( high & 0x80 )
                 value = -value;
 
-            return std::make_pair(3, Value(value));
+            return std::make_pair(3, CborValue(value));
         }
         case SinglePrecisionFloat: {
             if( size < 5 )
             {
                 std::cerr << "Unexpected end of data" << std::endl;
-                return std::make_pair(0, Value());
+                return std::make_pair(0, CborValue());
             }
 
             union {
@@ -186,13 +186,13 @@ std::pair<size_t, Value> simpleOrFloat(unsigned char minorType, const unsigned c
             memcpy(&buf.u32, &data[1], sizeof(buf.u32));
             buf.u32 = be32toh(buf.u32);
 
-            return std::make_pair(5, Value(buf.value));
+            return std::make_pair(5, CborValue(buf.value));
         }
         case DoublePrecisionFloat: {
             if( size < 9 )
             {
                 std::cerr << "Unexpected end of data" << std::endl;
-                return std::make_pair(0, Value());
+                return std::make_pair(0, CborValue());
             }
 
             union {
@@ -203,7 +203,7 @@ std::pair<size_t, Value> simpleOrFloat(unsigned char minorType, const unsigned c
             memcpy(&buf.u64, &data[1], sizeof(buf.u64));
             buf.u64 = be64toh(buf.u64);
 
-            return std::make_pair(9, Value(buf.value));
+            return std::make_pair(9, CborValue(buf.value));
         }
     }
 
@@ -211,10 +211,10 @@ std::pair<size_t, Value> simpleOrFloat(unsigned char minorType, const unsigned c
               << " for simple value" << std::endl;
     assert(false);
 
-    return std::make_pair(0, Value());
+    return std::make_pair(0, CborValue());
 }
 
-std::pair<size_t, Value> readByteString(uint8_t minorType, const unsigned char *data, size_t size)
+std::pair<size_t, CborValue> readByteString(uint8_t minorType, const unsigned char *data, size_t size)
 {
     if( minorType == 0x1f )  // todo: 0xff break string
         abort();
@@ -225,13 +225,13 @@ std::pair<size_t, Value> readByteString(uint8_t minorType, const unsigned char *
     if( pair.first == 0 )
     {
         // empty string?
-        return std::make_pair(pair.first, Value(""));
+        return std::make_pair(pair.first, CborValue(""));
     }
 
     if( length > pair.first + size )
     {
         std::cerr << "Unexpected end of data" << std::endl;
-        return std::make_pair(0, Value());
+        return std::make_pair(0, CborValue());
     }
 
     const char *ptr = reinterpret_cast<const char *>(data + pair.first);
@@ -240,7 +240,7 @@ std::pair<size_t, Value> readByteString(uint8_t minorType, const unsigned char *
     return std::make_pair(pair.first + pair.second, buf);
 }
 
-std::pair<size_t, Value> readString(uint8_t minorType, const unsigned char *data, size_t size)
+std::pair<size_t, CborValue> readString(uint8_t minorType, const unsigned char *data, size_t size)
 {
     if( minorType == 0x1f )  // todo: 0xff break string
         abort();
@@ -251,13 +251,13 @@ std::pair<size_t, Value> readString(uint8_t minorType, const unsigned char *data
     if( pair.first == 0 )
     {
         // empty string?
-        return std::make_pair(pair.first, Value(""));
+        return std::make_pair(pair.first, CborValue(""));
     }
 
     if( length > pair.first + size )
     {
         std::cerr << "Unexpected end of data" << std::endl;
-        return std::make_pair(0, Value());
+        return std::make_pair(0, CborValue());
     }
 
     const char *ptr = reinterpret_cast<const char *>(data + pair.first);
@@ -265,7 +265,7 @@ std::pair<size_t, Value> readString(uint8_t minorType, const unsigned char *data
     return std::make_pair(pair.first + pair.second, std::string(ptr, ptr + length));
 }
 
-std::pair<size_t, Value> readArray(uint8_t minorType, const unsigned char *data, size_t size)
+std::pair<size_t, CborValue> readArray(uint8_t minorType, const unsigned char *data, size_t size)
 {
     if( minorType == 0x1f )  // todo: 0xff break array
         abort();
@@ -276,10 +276,10 @@ std::pair<size_t, Value> readArray(uint8_t minorType, const unsigned char *data,
     if( pair.first == 0 )
     {
         // empty array?
-        return std::make_pair(pair.first, Value(std::vector<Value>()));
+        return std::make_pair(pair.first, CborValue(std::vector<CborValue>()));
     }
 
-    std::vector<Value> result;
+    std::vector<CborValue> result;
 
     result.reserve(pair.second);
 
@@ -288,10 +288,10 @@ std::pair<size_t, Value> readArray(uint8_t minorType, const unsigned char *data,
         if( offset >= size )
         {
             std::cerr << "Unexpected end of data" << std::endl;
-            return std::make_pair(0, Value());
+            return std::make_pair(0, CborValue());
         }
 
-        std::pair<size_t, Value> pair = internalRead(data + offset, size - offset);
+        std::pair<size_t, CborValue> pair = internalRead(data + offset, size - offset);
 
         offset += pair.first;
         result.push_back(pair.second);
@@ -300,7 +300,7 @@ std::pair<size_t, Value> readArray(uint8_t minorType, const unsigned char *data,
     return std::make_pair(offset, result);
 }
 
-std::pair<size_t, Value> readMap(uint8_t minorType, const unsigned char *data, size_t size)
+std::pair<size_t, CborValue> readMap(uint8_t minorType, const unsigned char *data, size_t size)
 {
     if( minorType == 0x1f )  // todo: 0xff break array
         abort();
@@ -311,21 +311,21 @@ std::pair<size_t, Value> readMap(uint8_t minorType, const unsigned char *data, s
     if( pair.first == 0 )
     {
         // empty map?
-        return std::make_pair(pair.first, std::map<Value, Value>());
+        return std::make_pair(pair.first, std::map<CborValue, CborValue>());
     }
 
-    std::map<Value, Value> result;
+    std::map<CborValue, CborValue> result;
 
     for(size_t i = 0; i < pair.second; ++i)
     {
         if( offset >= size )
         {
             std::cerr << "Unexpected end of data" << std::endl;
-            return std::make_pair(0, Value());
+            return std::make_pair(0, CborValue());
         }
 
-        std::pair<size_t, Value> pair1 = internalRead(data + offset, size - offset);
-        std::pair<size_t, Value> pair2 = internalRead(data + offset + pair1.first, size - offset - pair1.first);
+        std::pair<size_t, CborValue> pair1 = internalRead(data + offset, size - offset);
+        std::pair<size_t, CborValue> pair2 = internalRead(data + offset + pair1.first, size - offset - pair1.first);
 
         assert( pair1.first != 0 );
         assert( pair2.first != 0 );
@@ -339,15 +339,15 @@ std::pair<size_t, Value> readMap(uint8_t minorType, const unsigned char *data, s
     return std::make_pair(offset, result);
 }
 
-std::pair<size_t, Value> readBignum(const unsigned char *data, size_t size, bool positive)
+std::pair<size_t, CborValue> readBignum(const unsigned char *data, size_t size, bool positive)
 {
-    Value::BigInteger bigInteger;
-    std::pair<size_t, Value> pair = internalRead(data, size);
+    CborValue::BigInteger bigInteger;
+    std::pair<size_t, CborValue> pair = internalRead(data, size);
 
     if( pair.first == 0 )
     {
         // fail?
-        return std::make_pair(pair.first, Value());
+        return std::make_pair(pair.first, CborValue());
     }
 
     std::vector<char> binaryString = pair.second.toByteString();
@@ -377,7 +377,7 @@ std::pair<size_t, Value> readBignum(const unsigned char *data, size_t size, bool
 }
 
 
-std::pair<size_t, Value> readTagger(uint8_t minorType, const unsigned char *data, size_t size)
+std::pair<size_t, CborValue> readTagger(uint8_t minorType, const unsigned char *data, size_t size)
 {
     switch(minorType)
     {
@@ -401,10 +401,10 @@ std::pair<size_t, Value> readTagger(uint8_t minorType, const unsigned char *data
               << static_cast<int>(minorType) << std::endl;
     assert(false);
 
-    return std::make_pair(0, Value());
+    return std::make_pair(0, CborValue());
 }
 
-static std::pair<size_t, Value> internalRead(const unsigned char *data, size_t size)
+static std::pair<size_t, CborValue> internalRead(const unsigned char *data, size_t size)
 {
     unsigned char majorType = (data[0] & 0xe0) >> 5;
     unsigned char minorType = (data[0] & 0x1f);
@@ -449,13 +449,13 @@ static std::pair<size_t, Value> internalRead(const unsigned char *data, size_t s
               << static_cast<int>(minorType) << std::endl;
     assert(false);
 
-    return std::make_pair(0, Value());
+    return std::make_pair(0, CborValue());
 }
 
-Value cborRead(const std::vector<char> &data)
+CborValue cborRead(const std::vector<char> &data)
 {
     if( data.empty() )
-        return Value();
+        return CborValue();
 
     return internalRead(reinterpret_cast<const unsigned char *>(data.data()), data.size()).second;
 }

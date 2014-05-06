@@ -5,8 +5,8 @@
 #include <boost/test/unit_test.hpp>
 #include <math.h>
 
-#include "../src/cbor.h"
-#include "../src/value.h"
+#include "../src/cborcpp.h"
+#include "../src/cborvalue.h"
 
 
 template<size_t N>
@@ -18,7 +18,7 @@ std::vector<char> toVector(const char (&ptr)[N])
         return std::vector<char>();
 }
 
-Value decode(const std::vector<char> &data)
+CborValue decode(const std::vector<char> &data)
 {
     return cborRead(data);
 }
@@ -29,7 +29,7 @@ std::vector<char> encode(const T &value)
     return cborWrite(value);
 }
 
-std::ostream & operator << (std::ostream &stream, const Value &v)
+std::ostream & operator << (std::ostream &stream, const CborValue &v)
 {
     stream << v.inspect();
     return stream;
@@ -85,13 +85,13 @@ BOOST_AUTO_TEST_CASE( NegativeNumbers )
     {
         // -18446744073709551616LL too big for 64-bit integer. This value must
         // be writed as BigInteger. But encoded as 64-bit integer.
-        Value::BigInteger bitInteger;
+        CborValue::BigInteger bitInteger;
 
         bitInteger.positive = false;
         const char value[] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
         bitInteger.bigint.assign(value, value + sizeof(value));
 
-        BOOST_CHECK_EQUAL(Value(bitInteger), decode(toVector("\x3b\xff\xff\xff\xff\xff\xff\xff\xff")));
+        BOOST_CHECK_EQUAL(CborValue(bitInteger), decode(toVector("\x3b\xff\xff\xff\xff\xff\xff\xff\xff")));
         BOOST_VERIFY(encode(bitInteger) == toVector("\x3b\xff\xff\xff\xff\xff\xff\xff\xff"));
     }
 
@@ -165,13 +165,13 @@ BOOST_AUTO_TEST_CASE( BigNumbers )
         const char bigNumData [] = "\x01\x00\x00\x00\x00\x00\x00\x00\x01";
         const std::vector<char> bigNumBuf(bigNumData, bigNumData + sizeof(bigNumData) - 1);
         const char encoded[] = "\xc2\x49\x01\x00\x00\x00\x00\x00\x00\x00\x01";
-        Value::BigInteger bigInteger;
+        CborValue::BigInteger bigInteger;
 
         bigInteger.positive = true;
         bigInteger.bigint = bigNumBuf;
 
-        BOOST_CHECK_EQUAL(Value(bigInteger), decode(toVector(encoded)));
-        BOOST_CHECK(encode(Value(bigInteger)) == toVector(encoded));
+        BOOST_CHECK_EQUAL(CborValue(bigInteger), decode(toVector(encoded)));
+        BOOST_CHECK(encode(CborValue(bigInteger)) == toVector(encoded));
     }
 
     {
@@ -179,13 +179,13 @@ BOOST_AUTO_TEST_CASE( BigNumbers )
         const char bigNumData [] = "\x01\x00\x00\x00\x00\x00\x00\x00\x01";
         const std::vector<char> bigNumBuf(bigNumData, bigNumData + sizeof(bigNumData) - 1);
         const char encoded[] = "\xc3\x49\x01\x00\x00\x00\x00\x00\x00\x00\x00";
-        Value::BigInteger bigInteger;
+        CborValue::BigInteger bigInteger;
 
         bigInteger.positive = false;
         bigInteger.bigint = bigNumBuf;
 
-        BOOST_CHECK_EQUAL(Value(bigInteger), decode(toVector(encoded)));
-        BOOST_CHECK(encode(Value(bigInteger)) == toVector(encoded));
+        BOOST_CHECK_EQUAL(CborValue(bigInteger), decode(toVector(encoded)));
+        BOOST_CHECK(encode(CborValue(bigInteger)) == toVector(encoded));
     }
 }
 
@@ -193,12 +193,12 @@ BOOST_AUTO_TEST_CASE( SimpleValues )
 {
     BOOST_CHECK_EQUAL(false, decode(toVector("\xf4")).toBool());
     BOOST_CHECK_EQUAL(true, decode(toVector("\xf5")).toBool());
-    BOOST_CHECK(decode(toVector("\xf6")).type() == Value::NullType);
-    BOOST_CHECK(decode(toVector("\xf7")).type() == Value::UndefinedType);
-    BOOST_CHECK(encode(Value(false)) == toVector("\xf4"));
-    BOOST_CHECK(encode(Value(true)) == toVector("\xf5"));
-    BOOST_CHECK(encode(Value(Value::NullTag())) == toVector("\xf6"));
-    BOOST_CHECK(encode(Value(Value::UndefinedTag())) == toVector("\xf7"));
+    BOOST_CHECK(decode(toVector("\xf6")).type() == CborValue::NullType);
+    BOOST_CHECK(decode(toVector("\xf7")).type() == CborValue::UndefinedType);
+    BOOST_CHECK(encode(CborValue(false)) == toVector("\xf4"));
+    BOOST_CHECK(encode(CborValue(true)) == toVector("\xf5"));
+    BOOST_CHECK(encode(CborValue(CborValue::NullTag())) == toVector("\xf6"));
+    BOOST_CHECK(encode(CborValue(CborValue::UndefinedTag())) == toVector("\xf7"));
 
 
 //        | simple(16)                   | 0xf0                               |
@@ -253,11 +253,11 @@ BOOST_AUTO_TEST_CASE( StringValues )
 
 BOOST_AUTO_TEST_CASE( MapsAndArrayValues )
 {
-    BOOST_CHECK_EQUAL(std::vector<Value>(), decode(toVector("\x80")));
-    BOOST_CHECK(encode(std::vector<Value>()) == toVector("\x80"));
+    BOOST_CHECK_EQUAL(std::vector<CborValue>(), decode(toVector("\x80")));
+    BOOST_CHECK(encode(std::vector<CborValue>()) == toVector("\x80"));
 
     {
-        std::vector<Value>  arr;
+        std::vector<CborValue>  arr;
 
         arr.push_back(1);
         arr.push_back(2);
@@ -268,9 +268,9 @@ BOOST_AUTO_TEST_CASE( MapsAndArrayValues )
     }
 
     {
-        std::vector<Value> arr1;
-        std::vector<Value> arr2;
-        std::vector<Value> arr;
+        std::vector<CborValue> arr1;
+        std::vector<CborValue> arr2;
+        std::vector<CborValue> arr;
 
         arr1.push_back(2);
         arr1.push_back(3);
@@ -287,7 +287,7 @@ BOOST_AUTO_TEST_CASE( MapsAndArrayValues )
     }
 
     {
-        std::vector<Value> arr;
+        std::vector<CborValue> arr;
 
         for(int i = 1; i <= 25; ++i)
             arr.push_back(i);
@@ -301,41 +301,41 @@ BOOST_AUTO_TEST_CASE( MapsAndArrayValues )
 
 
     {
-        std::map<Value, Value> emptyMap;
+        std::map<CborValue, CborValue> emptyMap;
 
         BOOST_CHECK_EQUAL(emptyMap, decode(toVector("\xa0")));        
         BOOST_CHECK(encode(emptyMap) == toVector("\xa0"));
     }
 
     {
-        std::map<Value, Value> map;
+        std::map<CborValue, CborValue> map;
 
-        map[Value(1)] = Value(2);
-        map[Value(3)] = Value(4);
+        map[CborValue(1)] = CborValue(2);
+        map[CborValue(3)] = CborValue(4);
 
         BOOST_CHECK_EQUAL(map, decode(toVector("\xa2\x01\x02\x03\x04")));        
         BOOST_CHECK(encode(map) == toVector("\xa2\x01\x02\x03\x04"));
     }
 
     {
-        std::vector<Value> arr;
-        std::map<Value, Value> map;
+        std::vector<CborValue> arr;
+        std::map<CborValue, CborValue> map;
 
         arr.push_back(2);
         arr.push_back(3);
 
-        map.insert(std::make_pair(Value("a"), Value(1)));
-        map.insert(std::make_pair(Value("b"), arr));
+        map.insert(std::make_pair(CborValue("a"), CborValue(1)));
+        map.insert(std::make_pair(CborValue("b"), arr));
 
         BOOST_CHECK_EQUAL(map, decode(toVector("\xa2\x61\x61\x01\x61\x62\x82\x02\x03")));
         BOOST_CHECK(encode(map) == toVector("\xa2\x61\x61\x01\x61\x62\x82\x02\x03"));
     }
 
     {
-        std::map<Value, Value> map;
-        std::vector<Value> array;
+        std::map<CborValue, CborValue> map;
+        std::vector<CborValue> array;
 
-        map[Value("b")] = Value("c");
+        map[CborValue("b")] = CborValue("c");
         array.push_back("a");
         array.push_back(map);
 
@@ -344,13 +344,13 @@ BOOST_AUTO_TEST_CASE( MapsAndArrayValues )
     }
 
     {
-        std::map<Value, Value> map;
+        std::map<CborValue, CborValue> map;
 
-        map[Value("a")] = Value("A");
-        map[Value("b")] = Value("B");
-        map[Value("c")] = Value("C");
-        map[Value("d")] = Value("D");
-        map[Value("e")] =  Value("E");
+        map[CborValue("a")] = CborValue("A");
+        map[CborValue("b")] = CborValue("B");
+        map[CborValue("c")] = CborValue("C");
+        map[CborValue("d")] = CborValue("D");
+        map[CborValue("e")] =  CborValue("E");
 
         std::vector<char> data = toVector("\xa5\x61\x61\x61\x41\x61\x62\x61\x42\x61\x63"
                                           "\x61\x43\x61\x64\x61\x44\x61\x65\x61\x45");
@@ -397,4 +397,94 @@ BOOST_AUTO_TEST_CASE( BinaryString )
 //        |                              |                                    |
 //        | (_ "strea", "ming")          | 0x7f657374726561646d696e67ff       |
 //        |                              |                                    |
+}
+
+BOOST_AUTO_TEST_CASE( Interface )
+{
+    {
+        std::map<CborValue, CborValue> map;
+
+        map[CborValue("a")] = CborValue("A");
+        map[CborValue("b")] = CborValue("B");
+        map[CborValue("c")] = CborValue("C");
+
+        CborValue value(map);
+
+        BOOST_CHECK(value.size() == 3);
+        BOOST_CHECK(value.hasMember("a"));
+        BOOST_CHECK(value.hasMember("b"));
+        BOOST_CHECK(value.hasMember("c"));
+        BOOST_CHECK(value.hasMember("A") == false );
+        BOOST_CHECK(value.hasMember("B") == false );
+        BOOST_CHECK(value.hasMember("C") == false );
+
+        BOOST_CHECK(value.member("a") == CborValue("A"));
+        BOOST_CHECK(value.member("b") == CborValue("B"));
+        BOOST_CHECK(value.member("c") == CborValue("C"));
+    }
+
+    {
+        std::vector<CborValue> arr;
+
+        arr.push_back(CborValue("a"));
+        arr.push_back(CborValue("b"));
+        arr.push_back(CborValue(1));
+        arr.push_back(CborValue(2));
+
+        CborValue value(arr);
+
+        BOOST_CHECK(value.size() == 4);
+
+        BOOST_CHECK(value.at(0) == CborValue("a"));
+        BOOST_CHECK(value.at(1) == CborValue("b"));
+        BOOST_CHECK(value.at(2) == CborValue(1));
+        BOOST_CHECK(value.at(3) == CborValue(2));
+    }
+
+    {
+        std::map<CborValue, CborValue> map;
+
+        map[CborValue("a")] = CborValue("A");
+        map[CborValue("b")] = CborValue("B");
+
+
+        CborValue cborMap(map);
+        CborValue::Iterator it(cborMap);
+
+        BOOST_CHECK(it.hasNext() == true);
+        BOOST_CHECK(it.hasPrev() == false);
+        BOOST_CHECK(it.next() == CborValue("A"));
+        BOOST_CHECK(it.key() == CborValue("a"));
+        BOOST_CHECK(it.value() == CborValue("A"));
+
+        BOOST_CHECK(it.next() == CborValue("B"));
+        BOOST_CHECK(it.hasNext() == false);
+        BOOST_CHECK(it.hasPrev() == true);
+        BOOST_CHECK(it.key() == CborValue("b"));
+        BOOST_CHECK(it.value() == CborValue("B"));
+    }
+
+    {
+        std::vector<CborValue> arr;
+
+        arr.push_back(CborValue("A"));
+        arr.push_back(CborValue("B"));
+
+
+        CborValue cborArr(arr);
+        CborValue::Iterator it(cborArr);
+
+        BOOST_CHECK(it.hasNext() == true);
+        BOOST_CHECK(it.hasPrev() == false);
+        BOOST_CHECK(it.next() == CborValue("A"));
+        BOOST_CHECK(it.key() == CborValue(0));
+        BOOST_CHECK(it.value() == CborValue("A"));
+
+        BOOST_CHECK(it.next() == CborValue("B"));
+
+        BOOST_CHECK(it.hasNext() == false);
+        BOOST_CHECK(it.hasPrev() == true);
+        BOOST_CHECK(it.key() == CborValue(1));
+        BOOST_CHECK(it.value() == CborValue("B"));
+    }
 }

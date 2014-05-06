@@ -8,8 +8,8 @@
 
 #include <vector>
 
-#include "value.h"
+#include "cborvalue.h"
 
-Value cborRead(const std::vector<char> &data);
+CborValue cborRead(const std::vector<char> &data);
 
 #endif // CBORREADER_H

@@ -6,15 +6,15 @@ FIND_PACKAGE(Boost COMPONENTS unit_test_framework REQUIRED)
 SET( CMAKE_CXX_FLAGS "-Wextra -Wall")
 
 SET (HEADERS
-    src/value.h
-    src/cbor.h
+    src/cborvalue.h
+    src/cborcpp.h
     src/cborwriter.h
     src/cborreader.h
     src/cborprivate.h
 )
 
 SET (SOURCES
-    src/value.cpp
+    src/cborvalue.cpp
     src/cborwriter.cpp
     src/cborreader.cpp
     tests/main.cpp

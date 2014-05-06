@@ -8,8 +8,8 @@
 
 #include <vector>
 
-#include "value.h"
+#include "cborvalue.h"
 
-std::vector<char> cborWrite(const Value &value);
+std::vector<char> cborWrite(const CborValue &value);
 
 #endif // CBORWRITER_H

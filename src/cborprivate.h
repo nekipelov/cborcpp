@@ -14,7 +14,7 @@ enum Types {
     Array = 4,
     Map = 5,
     Tag = 6,
-    Prim = 7,
+    Prim = 7
 };
 
 enum {

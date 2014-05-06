@@ -10,13 +10,14 @@
 #include <vector>
 #include <map>
 #include <list>
-#include <ostream>
-
-#include <boost/variant.hpp>
+#include <stdexcept>
 
 #include <stdint.h>
 
-class Value {
+#include <boost/variant.hpp>
+#include <boost/scoped_ptr.hpp>
+
+class CborValue {
 public:
     enum Type {
         NullType,
@@ -72,23 +73,45 @@ public:
         }
     };
 
-    Value();
-    Value(NullTag);
-    Value(UndefinedTag);
-    Value(bool v);
-    Value(int i);
-    Value(int64_t i);
-    Value(uint64_t i, bool positive = true);
-    Value(double d);
-    Value(const std::string &s);
-    Value(const std::vector<char> &bs);
-    Value(const char *s);
-    Value(const std::vector<Value> &vec);
-    Value(const std::map<Value, Value> &map);
-    Value(const BigInteger &bigint);
+    class IteratorImpl;
+    class Iterator {
+    public:
+        Iterator(const CborValue &value);
+        ~Iterator();
 
-    static Value null();
-    static Value undefiend();
+        bool hasNext() const;
+        bool hasPrev() const;
+
+        CborValue next();
+        CborValue prev();
+
+        // Index or map key
+        CborValue key() const;
+        // Value
+        CborValue value() const;
+
+    private:
+        friend class CborValue;
+        boost::scoped_ptr<IteratorImpl> pimpl;
+    };
+
+    CborValue();
+    CborValue(NullTag);
+    CborValue(UndefinedTag);
+    CborValue(bool v);
+    CborValue(int i);
+    CborValue(int64_t i);
+    CborValue(uint64_t i, bool positive = true);
+    CborValue(double d);
+    CborValue(const std::string &s);
+    CborValue(const std::vector<char> &bs);
+    CborValue(const char *s);
+    CborValue(const std::vector<CborValue> &vec);
+    CborValue(const std::map<CborValue, CborValue> &map);
+    CborValue(const BigInteger &bigint);
+
+    static CborValue null();
+    static CborValue undefiend();
 
     bool isNull() const;
     bool isUndefined() const;
@@ -108,21 +131,40 @@ public:
     double toDouble() const;
     std::string toString() const;
     std::vector<char> toByteString() const;
-    std::vector<Value> toArray() const;
-    std::map<Value, Value> toMap() const;
+    std::vector<CborValue> toArray() const;
+    std::map<CborValue, CborValue> toMap() const;
     BigInteger toBigInteger() const;
 
     Type type() const;
     std::string inspect() const;
 
-    template<typename T>
-    static Value convertFrom(const std::vector<T> &arr);
+    // map and array
+    size_t size() const;
+    bool isEmpty() const;
+
+    // for map
+    bool hasMember(const CborValue &key) const;
+    CborValue member(const CborValue &key) const;
+
+    bool hasMember(const char *key) const;
+    CborValue member(const char *key) const;
 
     template<typename T>
-    static Value convertFrom(const std::list<T> &list);
+    bool hasMember(const T &key) const;
+    template<typename T>
+    CborValue member(const T &key) const;
+
+    // for array
+    CborValue at(size_t arrayIndex) const;
+
+    template<typename T>
+    static CborValue convertFrom(const std::vector<T> &arr);
+
+    template<typename T>
+    static CborValue convertFrom(const std::list<T> &list);
 
     template<typename TKey, typename TValue>
-    static Value convertFrom(const std::map<TKey, TValue> &map);
+    static CborValue convertFrom(const std::map<TKey, TValue> &map);
 
 protected:
     template<typename T>
@@ -158,28 +200,55 @@ private:
         uint64_t value;
     };
 
-    boost::variant<NullTag, UndefinedTag, bool, PositiveInteger, NegativeInteger, double, std::string, std::vector<char>,
-                   std::vector<Value>, std::map<Value, Value>, BigInteger > value;
+    typedef boost::variant<NullTag, UndefinedTag, bool, PositiveInteger, NegativeInteger,
+                           double, std::string, std::vector<char>, std::vector<CborValue>,
+                           std::map<CborValue, CborValue>, BigInteger > Variant;
 
-    friend bool operator < (const Value &lhs, const Value &rhs);
-    friend bool operator == (const Value &lhs, const Value &rhs);
+    Variant value;
+
+    friend bool operator < (const CborValue &lhs, const CborValue &rhs);
+    friend bool operator == (const CborValue &lhs, const CborValue &rhs);
 };
 
-bool operator < (const Value &lhs, const Value &rhs);
-bool operator == (const Value &lhs, const Value &rhs);
+bool operator < (const CborValue &lhs, const CborValue &rhs);
+bool operator == (const CborValue &lhs, const CborValue &rhs);
 
 
-template<typename T>
-T Value::castTo() const
+inline bool CborValue::hasMember(const char *key) const
 {
-    if( value.type() == typeid(T) )
-        return boost::get<T>(value);
-    else
-        return T();
+    return hasMember(std::string(key));
+}
+
+inline CborValue CborValue::member(const char *key) const
+{
+    return member(std::string(key));
 }
 
 template<typename T>
-bool Value::typeEq() const
+bool CborValue::hasMember(const T &key) const
+{
+    return hasMember(CborValue(key));
+}
+
+template<typename T>
+CborValue CborValue::member(const T &key) const
+{
+    return member(CborValue(key));
+}
+
+template<typename T>
+T CborValue::castTo() const
+{
+    if( value.type() == typeid(T) )
+        return boost::get<T>(value);
+    // else
+    //    return T();
+
+    throw std::runtime_error( "CborValue: cast error");
+}
+
+template<typename T>
+bool CborValue::typeEq() const
 {
     if( value.type() == typeid(T) )
         return true;
@@ -188,9 +257,9 @@ bool Value::typeEq() const
 }
 
 template<typename T>
-Value Value::convertFrom(const std::vector<T> &arr)
+CborValue CborValue::convertFrom(const std::vector<T> &arr)
 {
-    std::vector<Value> result;
+    std::vector<CborValue> result;
 
     result.reserve(arr.size());
     std::copy(arr.begin(), arr.end(), std::back_inserter(result));
@@ -198,17 +267,17 @@ Value Value::convertFrom(const std::vector<T> &arr)
 }
 
 template<typename T>
-Value Value::convertFrom(const std::list<T> &list)
+CborValue CborValue::convertFrom(const std::list<T> &list)
 {
-    std::vector<Value> result;
+    std::vector<CborValue> result;
     std::copy(list.begin(), list.end(), std::back_inserter(result));
     return result;
 }
 
 template<typename TKey, typename TValue>
-Value Value::convertFrom(const std::map<TKey, TValue> &map)
+CborValue CborValue::convertFrom(const std::map<TKey, TValue> &map)
 {
-    std::map<Value, Value> result;
+    std::map<CborValue, CborValue> result;
     std::copy(map.begin(), map.end(), std::inserter(result, result.end()));
     return result;
 }

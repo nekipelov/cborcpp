@@ -29,24 +29,24 @@ static const int halfPrecisionFloat = simpleStart + 0x19;   // 0xf9
 static const int singlePrecisionFloat = simpleStart + 0x1a; // 0xfa
 static const int doublePrecisionFloat = simpleStart + 0x1b; // 0xfb
 
-static void cborWriteInternal(std::vector<char> &buff, const Value &value);
+static void cborWriteInternal(std::vector<char> &buff, const CborValue &value);
 
 static void writeNull(std::vector<char> &buff)
 {
-    const char nil = 0xf6;
+    const char nil = static_cast<char>(0xf6);
     buff.push_back(nil);
 }
 
 static void writeUndefined(std::vector<char> &buff)
 {
-    const char undefined = 0xf7;
+    const char undefined = static_cast<char>(0xf7);
     buff.push_back(undefined);
 }
 
-static void writeBool(std::vector<char> &buff, const Value &value)
+static void writeBool(std::vector<char> &buff, const CborValue &value)
 {
-    const char trueValue = 0xf5;
-    const char falseValue = 0xf4;
+    const char trueValue = static_cast<char>(0xf5);
+    const char falseValue = static_cast<char>(0xf4);
 
     if( value.toBool() )
         buff.push_back(trueValue);
@@ -113,7 +113,7 @@ static void writeInteger(std::vector<char> &buff, uint64_t value, int type)
     }
 }
 
-static void writePositiveInteger(std::vector<char> &buff, const Value &value)
+static void writePositiveInteger(std::vector<char> &buff, const CborValue &value)
 {
     uint64_t i = value.toPositiveInteger();
 
@@ -128,7 +128,7 @@ static void writePositiveInteger(std::vector<char> &buff, const Value &value)
     }
 }
 
-static void writeNegativeInteger(std::vector<char> &buff, const Value &value)
+static void writeNegativeInteger(std::vector<char> &buff, const CborValue &value)
 {
     uint64_t i = value.toNegativeInteger();
 
@@ -142,7 +142,7 @@ static void writeNegativeInteger(std::vector<char> &buff, const Value &value)
     }
 }
 
-static void writeString(std::vector<char> &buff, const Value &value)
+static void writeString(std::vector<char> &buff, const CborValue &value)
 {
     const std::string &s = value.toString();
 
@@ -151,7 +151,7 @@ static void writeString(std::vector<char> &buff, const Value &value)
     buff.insert(buff.end(), s.begin(), s.end());
 }
 
-static void writeByteString(std::vector<char> &buff, const Value &value)
+static void writeByteString(std::vector<char> &buff, const CborValue &value)
 {
     const std::vector<char> &data = value.toByteString();
 
@@ -161,7 +161,7 @@ static void writeByteString(std::vector<char> &buff, const Value &value)
 }
 
 
-static void writeDouble(std::vector<char> &buff, const Value &value)
+static void writeDouble(std::vector<char> &buff, const CborValue &value)
 {
     double dv = value.toDouble();
     float fv = dv;
@@ -178,50 +178,53 @@ static void writeDouble(std::vector<char> &buff, const Value &value)
         int i32 = buf.ui32;
         if ((i32 & 0x1FFF) == 0)
         {
-            // IEEE 754 half-precision
-            uint16_t s16 = (i32 >> 16) & 0x8000;
-            int exponent = (i32 >> 23) & 0xff;
-            int mantissa = i32 & 0x7fffff;
+            do
+            {
+                // IEEE 754 half-precision
+                uint16_t s16 = (i32 >> 16) & 0x8000;
+                int exponent = (i32 >> 23) & 0xff;
+                int mantissa = i32 & 0x7fffff;
 
-            if (exponent == 0 && mantissa == 0)
-            {
-                ;
-            }
-            else if (exponent >= 113 && exponent <= 142)
-            {
-                // normalized
-                s16 += ((exponent - 112) << 10) + (mantissa >> 13);
-            }
-            else if (exponent >= 103 && exponent < 113)
-            {
-                // denorm, exp16 = 0
-                if (mantissa & ((1 << (126 - exponent)) - 1))
-                    goto float32; // loss of precision
-                s16 += ((mantissa + 0x800000) >> (126 - exponent));
-            }
-            else if (exponent == 255 && mantissa == 0)
-            {
-                // Inf
-                s16 += 0x7c00;
-            }
-            else
-            {
-                goto float32;  // loss of range
-            }
+                if (exponent == 0 && mantissa == 0)
+                {
+                    ;
+                }
+                else if (exponent >= 113 && exponent <= 142)
+                {
+                    // normalized
+                    s16 += ((exponent - 112) << 10) + (mantissa >> 13);
+                }
+                else if (exponent >= 103 && exponent < 113)
+                {
+                    // denorm, exp16 = 0
+                    if (mantissa & ((1 << (126 - exponent)) - 1))
+                        break; // loss of precision
+                    s16 += ((mantissa + 0x800000) >> (126 - exponent));
+                }
+                else if (exponent == 255 && mantissa == 0)
+                {
+                    // Inf
+                    s16 += 0x7c00;
+                }
+                else
+                {
+                    break;  // loss of range
+                }
 
-            s16 = htobe16(s16);
+                s16 = htobe16(s16);
 
-            uint8_t bytes[3] = {
-                halfPrecisionFloat,
-                static_cast<uint8_t>(s16 & 0xff),
-                static_cast<uint8_t>((s16 & 0xff00) >> 8)
-            };
+                uint8_t bytes[3] = {
+                    halfPrecisionFloat,
+                    static_cast<uint8_t>(s16 & 0xff),
+                    static_cast<uint8_t>((s16 & 0xff00) >> 8)
+                };
 
-            buff.insert(buff.end(), bytes, bytes + sizeof(bytes));
-            return;
+                buff.insert(buff.end(), bytes, bytes + sizeof(bytes));
+                return;
+            } while(0);
         }
 
-float32:
+
         // IEEE 754 single-precision
         buf.ui32 = htobe32(buf.ui32);
 
@@ -269,9 +272,9 @@ float32:
     }
 }
 
-static void writeArray(std::vector<char> &buff, const Value &value)
+static void writeArray(std::vector<char> &buff, const CborValue &value)
 {
-    const std::vector<Value> &arr = value.toArray();
+    const std::vector<CborValue> &arr = value.toArray();
 
     writeInteger(buff, arr.size(), arrayStart);
 
@@ -281,11 +284,11 @@ static void writeArray(std::vector<char> &buff, const Value &value)
     }
 }
 
-static void writeMap(std::vector<char> &buff, const Value &value)
+static void writeMap(std::vector<char> &buff, const CborValue &value)
 {
-    const std::map<Value, Value> &map = value.toMap();
-    std::map<Value, Value>::const_iterator it = map.begin();
-    std::map<Value, Value>::const_iterator end = map.end();
+    const std::map<CborValue, CborValue> &map = value.toMap();
+    std::map<CborValue, CborValue>::const_iterator it = map.begin();
+    std::map<CborValue, CborValue>::const_iterator end = map.end();
 
     writeInteger(buff, map.size(), mapStart);
 
@@ -296,9 +299,9 @@ static void writeMap(std::vector<char> &buff, const Value &value)
     }
 }
 
-static void writeBigInteger(std::vector<char> &buff, const Value &value)
+static void writeBigInteger(std::vector<char> &buff, const CborValue &value)
 {
-    Value::BigInteger bigInteger = value.toBigInteger();
+    CborValue::BigInteger bigInteger = value.toBigInteger();
 
     bool canBeWrittenAs64BitInteger = bigInteger.bigint.size() < 9;
     canBeWrittenAs64BitInteger = canBeWrittenAs64BitInteger || (
@@ -339,11 +342,11 @@ static void writeBigInteger(std::vector<char> &buff, const Value &value)
     {
         if( bigInteger.positive )
         {
-            buff.push_back(positiveBignum);
+            buff.push_back(static_cast<char>(positiveBignum));
         }
         else
         {
-            buff.push_back(negativeBignum);
+            buff.push_back(static_cast<char>(negativeBignum));
 
             for(size_t i = bigInteger.bigint.size(); i != 0 ; --i)
             {
@@ -355,50 +358,50 @@ static void writeBigInteger(std::vector<char> &buff, const Value &value)
                 }
                 else
                 {
-                    bigInteger.bigint[i - 1] = 0xff;
+                    bigInteger.bigint[i - 1] = static_cast<char>(0xff);
                 }
             }
         }
 
-        writeByteString(buff, Value(bigInteger.bigint));
+        writeByteString(buff, CborValue(bigInteger.bigint));
     }
 }
 
-static void cborWriteInternal(std::vector<char> &buff, const Value &value)
+static void cborWriteInternal(std::vector<char> &buff, const CborValue &value)
 {
     switch(value.type())
     {
-    case Value::NullType:
+    case CborValue::NullType:
         writeNull(buff);
         break;
-    case Value::UndefinedType:
+    case CborValue::UndefinedType:
         writeUndefined(buff);
         break;
-    case Value::BoolType:
+    case CborValue::BoolType:
         writeBool(buff, value);
         break;
-    case Value::NegativeIntegerType:
+    case CborValue::NegativeIntegerType:
         writeNegativeInteger(buff, value);
         break;
-    case Value::PositiveIntegerType:
+    case CborValue::PositiveIntegerType:
         writePositiveInteger(buff, value);
         break;
-    case Value::DoubleType:
+    case CborValue::DoubleType:
         writeDouble(buff, value);
         break;
-    case Value::StringType:
+    case CborValue::StringType:
         writeString(buff, value);
         break;
-    case Value::ByteStringType:
+    case CborValue::ByteStringType:
         writeByteString(buff, value);
         break;
-    case Value::ArrayType:
+    case CborValue::ArrayType:
         writeArray(buff, value);
         break;
-    case Value::MapType:
+    case CborValue::MapType:
         writeMap(buff, value);
         break;
-    case Value::BigIntegerType:
+    case CborValue::BigIntegerType:
         writeBigInteger(buff, value);
         break;
     default:
@@ -407,7 +410,7 @@ static void cborWriteInternal(std::vector<char> &buff, const Value &value)
     }
 }
 
-std::vector<char> cborWrite(const Value &value)
+std::vector<char> cborWrite(const CborValue &value)
 {
     std::vector<char> result;
 
