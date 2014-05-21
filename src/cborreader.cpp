@@ -10,6 +10,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdint.h>
+#include <iostream>
 
 #include "cborprivate.h"
 #include "cborreader.h"
@@ -20,10 +21,18 @@ std::pair<size_t, uint64_t> readIntegerValue(unsigned char minorType, const unsi
 {
     uint64_t result = 0;
     size_t bytesCount = 0;
+    
+    enum sizeInBytes {
+        Inline     = 0x17,
+        OneByte    = 0x18,
+        TwoBytes   = 0x19,
+        FourBytes  = 0x1a,
+        EightBytes = 0x1b        
+    };
 
     switch(minorType)
     {
-        case 0x18: {
+        case OneByte: {
             // one byte uint8_t follows
             if( size < 2 )
             {
@@ -34,7 +43,7 @@ std::pair<size_t, uint64_t> readIntegerValue(unsigned char minorType, const unsi
             result = data[1];
             break;
         }
-        case 0x19: {
+        case TwoBytes: {
             // two byte uint16_t follows
             if( size < 3 )
             {
@@ -48,7 +57,7 @@ std::pair<size_t, uint64_t> readIntegerValue(unsigned char minorType, const unsi
             bytesCount = 3;
             break;
         }
-        case 0x1a: {
+        case FourBytes: {
             // four byte uint32_t follows
             if( size < 5 )
             {
@@ -62,7 +71,7 @@ std::pair<size_t, uint64_t> readIntegerValue(unsigned char minorType, const unsi
             bytesCount = 5;
             break;
         }
-        case 0x1b: {
+        case EightBytes: {
             // eight byte uint64_t follows
             if( size < 9 )
             {
@@ -78,7 +87,7 @@ std::pair<size_t, uint64_t> readIntegerValue(unsigned char minorType, const unsi
         }
 
         default:
-            if( minorType <= 0x17 )
+            if( minorType <= Inline )
             {
                 result = static_cast<uint32_t>(minorType);
                 bytesCount = 1;
