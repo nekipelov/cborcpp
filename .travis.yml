@@ -5,6 +5,7 @@ compiler:
 
 before_script:
   - sudo apt-get install -qq libboost-dev
+  - sudo apt-get install -qq libboost-test-dev 
   - mkdir build
   - cd build
   - cmake ..
