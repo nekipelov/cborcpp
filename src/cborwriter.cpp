@@ -8,6 +8,7 @@
 #include <string.h>
 #include <endian.h>
 #include <stdint.h>
+#include <iostream>
 
 #include "cborprivate.h"
 #include "cborwriter.h"
